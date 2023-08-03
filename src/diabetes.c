@@ -1,10 +1,11 @@
 
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <ctype.h>
+#include <search.h>
 #include "utils.c"
 #include "filetools.c"
 #include "strtools.c"
@@ -35,8 +36,16 @@ typedef struct Parameter {
 	void *content;
 } Parameter;
 
-void read_twix_file(FILE* f, char** start, char** stop) {
-	// Read name of config
+struct ParameterList;
+typedef struct ParameterList {
+	struct ParameterList* next;
+	struct ParameterList* prev;
+	Parameter p;
+} ParameterList;
+
+void read_protocol(FILE* f, char** start, char** stop) {
+	// Read config
+	// TODO: what is it useful for?
 	char name[48]; // is this length the actual max?
 	{
 		for (int j = 0; j < 48; j++) {
@@ -47,6 +56,7 @@ void read_twix_file(FILE* f, char** start, char** stop) {
 		}
 	}
 
+	// Read protocol into string
 	char *str;
 	unsigned int len;
 	safe_fread(&len, sizeof(unsigned int), f);
@@ -64,8 +74,8 @@ void read_twix_file(FILE* f, char** start, char** stop) {
 	}
 
 	// Set new start and stop pointers of string
-	*start = find('{', str, str+len-1) + 1;
-	*stop = find('}', str+len-1, str) - 1;
+	*start = find('{', str, str+len-1);
+	*stop = find('}', str+len-1, str);
 	if (*start == NULL || *stop == NULL) {
 		printf("Error: could not find enclosing braces of outer scope\n");
 		exit(1);
@@ -74,26 +84,16 @@ void read_twix_file(FILE* f, char** start, char** stop) {
 }
 
 char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
-	char signature[] = "<Param";
-	size_t signature_length = sizeof(signature)-1;
 
 	// Strip spaces
-	start += strspn(start, " \n\r\t");
+	start += strspn(start, " \n\r\t") + 1; // +1 because of <
 
-	if (stop-start <= signature_length || strncmp(start, signature, signature_length) != 0) {
-		debug(start, signature_length);
-		printf("Error: invalid parameter signature\n");
-		printf("\n");
-		exit(1);
-	}
-	start += signature_length;
-
-	// Get type
-	for (int i = 0; i < 12; i++) {
+	// Parse type
+	for (int i = 0; i < sizeof(p->type); i++) {
 		char c = *start;
 		start++;
 		if (*start == '\0') {
-			printf("Error: parse_parameter(): unexpected null byte read");
+			printf("Error: unexpected null byte read");
 			exit(1);
 		}
 		if (c == '.') {
@@ -102,9 +102,13 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
 		}
 		p->type[i] = c;
 	}
+	if (p->type[sizeof(p->type)] != '\0') {
+		printf("Error: parameter type unexpectedly long");
+		exit(1);
+	}
 
 	// Get name
-	start += 1; // *start might be '\0'
+	start += 1;
 	char* closing_quote = find('\"', start, stop);
 	if (closing_quote == NULL) {
 		printf("Error: parse_parameter(): closing quote not found\n");
@@ -118,12 +122,12 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
 	else {
 		p->name[0] = '\0';
 	}
-	printf("%s\n", p->name);
 	return start + 2; // ">
 }
 
+
 // gets {...}
-void parse_parameter_content(Parameter* p, char* start, char* stop) {
+void parse_parameter_content(Parameter* p, char* start, char* stop, bool istype) {
 
 	start = find('{', start, stop) + 1;
 	stop = find('}', stop, start) - 1;
@@ -132,22 +136,107 @@ void parse_parameter_content(Parameter* p, char* start, char* stop) {
 		exit(1);
 	}
 
-	if (p->type == "MAP") {
+	//printf("%s %s\n", p->type, p->name);
+	if (strcmp(p->type, "ParamMap") == 0) {
 		char* next_start = start;
-		Parameter* list ....;
-		need some simple append functionality here
-		size_t i = 0;
-		while (next_start < start) {
+		ParameterList *list = (ParameterList*) malloc(sizeof(ParameterList));
+		list->prev = NULL;
+		p->content = (void*) list;
+		ParameterList* current_list = list;
+		Parameter* current_p;
+		while (next_start < stop) {
+			// Find start of parameter signature
 			next_start = find('<', next_start, stop);
 			if (next_start == NULL) break;
-			next_start = parse_parameter_name_type(&(list[i]), next_start, stop);
-			if (next_start == NULL) break;
-			append parameter to list
+
+			// Make new list entry
+			current_list->next = (ParameterList*) malloc(sizeof(ParameterList));
+			current_list->next->prev = current_list;
+			current_list = current_list->next;
+			current_p = &(current_list->p);
+
+			// Parse name
+			next_start = parse_parameter_name_type(current_p, next_start, stop);
+			if (next_start == NULL) {
+				printf("Error: parameter with unexpected name or type\n");
+				exit(1);
+			}
+
+			// Find enclosing scope
+			next_start = find('{', next_start, stop);
+			if (next_start == NULL) {
+				printf("Error: parameter without content\n");
+				exit(1);
+			}
+			char* closing_brace = find_matching(next_start, '}');
+
+			// Parse content
+			parse_parameter_content(current_p, next_start, closing_brace, istype);
+			next_start = closing_brace + 1;
 		}
-		store list in p contents
+	}
+	else if (strcmp(p->type, "ParamArray") == 0) {
+		// Check signature
+		start = find('<', start, stop) + 1;
+		char signature[] = "Default> ";
+		size_t signature_length = sizeof(signature)-1;
+		if (strncmp(start, signature, signature_length) != 0) {
+			printf("Error: parameter array with unexpected signature\n");
+			debug(start, sizeof(signature));
+		}
+		start += sizeof(signature)-1;
+
+		char *type_closing_brace = find_matching(start, '}');
+
+		// Parse name and type
+		Parameter* p_array_element = (Parameter*)malloc(sizeof(Parameter));
+		start = parse_parameter_name_type(p_array_element, start, type_closing_brace);
+		parse_parameter_content(p_array_element, start, type_closing_brace, true);
+		//printf("%s\n", p_array_element->type);
+
+		// Parse content
+		// Copy p_array_element for next element
+		// finally put into p->content
+	}
+	else if (strcmp(p->type, "ParamString") == 0) {
+		char *str_start = find('"', start, stop);
+		if (str_start == NULL) {
+			p->content = NULL;
+			return;
+		}
+		str_start += 1;
+		char *str_stop = find('"', str_start, stop);
+		size_t str_len = str_stop - str_start;
+		char *content = (char *) malloc(str_len+1);
+		memcpy(content, str_start, str_len);
+		content[str_len] = '\0';
+		p->content = (void *) content;
+		//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
+	}
+	else if (!istype && strcmp(p->type, "ParamLong") == 0) {
+		start += strspn(start, " \n\r\t");
+		stop = start + strspn(start, "-0123456789");
+		if (start == stop) {
+			p->content = NULL;
+			return;
+		}
+		int64_t *content = (int64_t *) &(p->content);
+		*content = strtol(start, NULL, 10);
+		//printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
+	}
+	else if (!istype && strcmp(p->type, "ParamDouble") == 0) {
+		start += strspn(start, " \n\r\t");
+		stop = start + strspn(start, "-.0123456789");
+		if (start == stop) {
+			p->content = NULL;
+			return;
+		}
+		double *content = (double *) &(p->content);
+		*content = strtod(start, NULL);
+		//printf("%s %s %lf\n", p->name, p->type, (double) *content);
 	}
 	else {
-		// Other parameter types
+		// Throw error when finished with all types
 	}
 	return;
 }
@@ -156,17 +245,13 @@ void parse_parameter_content(Parameter* p, char* start, char* stop) {
 
 int main(int argc, char* argv[]) {
 	
+	// Open file
 	FILE *f;
 	if (argc < 2) {
 		printf("Error: no filename given\n");
 		return 1;
 	}
 	f = fopen(argv[1], "rb");
-
-	// Get filesize, needed?
-	fseek(f, 0, SEEK_END);
-	uint64_t filesize = ftell(f);
-	fseek(f, 0, SEEK_SET);
 
 	// Check version
 	{
@@ -179,157 +264,28 @@ int main(int argc, char* argv[]) {
 	}
 	fseek(f, 0, SEEK_SET);
 
+	// Get file header
 	FileHeader file_header;
 	safe_fread(&file_header, sizeof(file_header), f);
 
+	// Iterate measurements
 	for (int i = 0; i < file_header.num; i++) {
+		// Read measurement header
 		uint64_t position = file_header.entries[i].offset;
 		fseek(f, position, SEEK_SET);
 		MeasurementHeader measurement_header;
 		safe_fread(&measurement_header, sizeof(MeasurementHeader), f);
 
+		// Read protocol into string
 		char *start, *stop;
-		read_twix_file(f, &start, &stop);
-		Parameter p;
-		start = parse_parameter_name_type(&p, start, stop);
-		debug(start, 1);
+		read_protocol(f, &start, &stop);
 
-		//_, n_buffer = np.fromfile(file, dtype=np.uint32, count=2)
-		//xprotocol = dict()
-		//pattern = br'(\w{4,})\x00(.{4})'
-		//pos = file.tell()
-		//for _ in range(n_buffer):
-		//	tmp = file.read(48)
-		//	matches = re.search(pattern, tmp, re.DOTALL)
-		//	name = matches.group(1).decode('latin1')
-		//	buf_len = struct.unpack('<I', matches.group(2))[0]
-		//	pos += len(matches.group())
-		//	file.seek(pos)
-		//	buf = file.read(buf_len).decode('latin1')
-		//	xprotocol[name] = parse_buffer(buf)
-		//	xprotocol["{}_raw".format(name)] = buf
-		//	pos += buf_len
-
-		//return xprotocol
-
-
-		//char *asd = malloc(200);
-		//safe_fread(asd, 200, f);
-		//for (int j = 0; j < 200; j++) {
-		//	printf("%c", asd[j]);
-		//}
-		//exit(1);
-
-		//buf_len = struct.unpack('<I', matches.group(2))[0]
-		//pos += len(matches.group())
-		//file.seek(pos)
-		//buf = file.read(buf_len).decode('latin1')
-		//xprotocol[name] = parse_buffer(buf)
-		//pos += buf_len
-
-		//char *asd = malloc(20000);
-		//fread(asd, 20000, 1, f);
-
-
-
-		//xprotocol = dict()
-		//pattern = br'(\w{4,})\x00(.{4})'
-		//pos = file.tell()
-		//for _ in range(n_buffer):
-		//	tmp = file.read(48)
-		//	matches = re.search(pattern, tmp, re.DOTALL)
-		//	name = matches.group(1).decode('latin1')
-		//	buf_len = struct.unpack('<I', matches.group(2))[0]
-		//	pos += len(matches.group())
-		//	file.seek(pos)
-		//	buf = file.read(buf_len).decode('latin1')
-		//	xprotocol[name] = parse_buffer(buf)
-		//	xprotocol["{}_raw".format(name)] = buf
-		//	pos += buf_len
-
-		}
-
-	/*
-
-	- for entry in fileheader entries
-        seek(offset of scan, from file header)
-		read MeasurementHeader
-
-		- parse protocol
-            seek(offset of meas from above)
-			- twixprot.parse_twix_hdr(fid)
-				read two uint32, second is num_buffers
-				pattern = br'(\w{4,})\x00(.{4})'
-				pos = file.tell()
-				for _ in range(n_buffer):
-					tmp = file.read(48)
-					matches = re.search(pattern, tmp, re.DOTALL)
-					name = matches.captures[1]
-					buf_len = struct.unpack('<I', matches.group(2))[0]
-					pos += len(matches.group())
-					file.seek(pos)
-					buf = file.read(buf_len).decode('latin1')
-					xprotocol[name] = parse_buffer(buf)
-					xprotocol["{}_raw".format(name)] = buf
-					pos += buf_len
-
-            seek(offset of meas from above)
-
-            out[-1]['hdr_str'] = np.fromfile(fid, dtype="<S1", count=hdr_len)
-
-
-
-
-	*/
-
-
-    //for s in range(NScans):
-    //    if include_scans is not None and s not in include_scans:
-    //        # skip scan if it is not requested
-    //        continue
-
-    //    if version_is_ve:
-    //        out[-1]['raidfile_hdr'] = raidfile_hdr['entry'][s]
-
-    //    if parse_geometry:
-    //        out[-1]['geometry'] = twixtools.geometry.Geometry(out[-1])
-
-    //    # if data is not requested (headers only)
-    //    if not parse_data:
-    //        continue
-
-    //    pos = measOffset[s] + np.uint64(hdr_len)
-
-    //    if verbose:
-    //        print('Scan ', s)
-    //        progress_bar = tqdm(total=scanEnd - pos, unit='B', unit_scale=True, unit_divisor=1024)
-    //    while pos + 128 < scanEnd:  # fail-safe not to miss ACQEND
-    //        fid.seek(pos, os.SEEK_SET)
-    //        try:
-    //            mdb = twixtools.mdb.Mdb(fid, version_is_ve)
-    //        except ValueError:
-    //            print(f"WARNING: Mdb parsing encountered an error at file position {pos}/{scanEnd}, stopping here.")
-
-    //        # jump to mdh of next scan
-    //        pos += mdb.dma_len
-    //        if verbose:
-    //            progress_bar.update(mdb.dma_len)
-
-    //        if not keep_syncdata_and_acqend:
-    //            if mdb.is_flag_set('SYNCDATA'):
-    //                continue
-    //            elif mdb.is_flag_set('ACQEND'):
-    //                break
-
-    //        out[-1]['mdb'].append(mdb)
-
-    //        if mdb.is_flag_set('ACQEND'):
-    //            break
-
-    //    if verbose:
-    //        progress_bar.close()
-
-    //fid.close()
+		// Parse protocol
+		Parameter *p = (Parameter *) malloc(sizeof(Parameter));
+		strcpy(p->name, "XProtocol");
+		strcpy(p->type, "ParamMap");
+		parse_parameter_content(p, start, stop, false);
+	}
 
 	return 0;
 }
