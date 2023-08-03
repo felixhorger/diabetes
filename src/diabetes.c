@@ -125,118 +125,209 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
 	return start + 2; // ">
 }
 
+Parameter copy_parameter_type(Parameter *dest, Parameter *src) {
+	strcpy(dest->name, src->name);
+	strcpy(dest->type, src->type);
+	if (strcmp(src->type, "ParamMap") == 0) {
+		ParameterList *list = (ParameterList*) malloc(sizeof(ParameterList));
+		list->prev = NULL;
+		dest->content = (void*) list;
+		ParameterList *src_list = (ParameterList*) src->content;
+		while (src_list != NULL) {
+			// Add new element to destination list and advance to it
+			list->next = (ParameterList*) malloc(sizeof(ParameterList));
+			list->next->prev = list;
+			list = list->next;
+			// Copy list entry
+			copy_parameter_type(&(list->p), &(src_list->p));
+			// Advance source list
+			src_list = src_list->next;
+		}
+	}
+	else if (strcmp(src->type, "ParamArray") == 0) {
+		Parameter *p_array = (Parameter*) malloc(sizeof(Parameter));
+		strcpy(p_array->type, "ParamMap");
+		p_array->name[0] = '\0';
+		dest->content = (void *) p_array;
+		copy_parameter_type(p_array, (Parameter*)src->content);
+	}
+	else {
+		dest->content = NULL;
+	}
+}
+
+enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
 
 // gets {...}
-void parse_parameter_content(Parameter* p, char* start, char* stop, bool istype) {
-
-	start = find('{', start, stop) + 1;
-	stop = find('}', stop, start) - 1;
+void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_mode mode) {
+	if ((mode & copy_type) == 0) {
+		/*	Problem is that with normal ParamMap, there are extra curly braces
+			But with ParamMap used for the ParamArray there aren't.
+			So, they are only to be removed if not parsing the contents of
+			a ParamArray via a ParamMap, i.e. if copy_type is off.
+		*/
+		start = find('{', start, stop) + 1;
+		stop = find('}', stop, start) - 1;
+	}
 	if (start == NULL || stop == NULL) {
 		printf("Error: could not find enclosing braces of parameter scope (%s)\n", p->name);
 		exit(1);
 	}
 
-	//printf("%s %s\n", p->type, p->name);
+	printf("%s %s\n", p->type, p->name);
 	if (strcmp(p->type, "ParamMap") == 0) {
-		char* next_start = start;
-		ParameterList *list = (ParameterList*) malloc(sizeof(ParameterList));
-		list->prev = NULL;
-		p->content = (void*) list;
-		ParameterList* current_list = list;
+		// Set up list of parameters
+		ParameterList *list;
+		if (mode & parse_type) {
+			// Make new list, names and types are to be filled in
+			list = (ParameterList*) malloc(sizeof(ParameterList));
+			list->prev = NULL;
+			p->content = (void*) list;
+		}
+		else {
+			// For ParamArray, names and types have been filled already (first element)
+			list = (ParameterList*) p->content;
+			if ((mode & copy_type) == 0) list = list->next;
+		}
 		Parameter* current_p;
-		while (next_start < stop) {
-			// Find start of parameter signature
-			next_start = find('<', next_start, stop);
-			if (next_start == NULL) break;
 
-			// Make new list entry
-			current_list->next = (ParameterList*) malloc(sizeof(ParameterList));
-			current_list->next->prev = current_list;
-			current_list = current_list->next;
-			current_p = &(current_list->p);
+		// Append all entries to list
+		while (start < stop) {
+			if (mode & parse_type) { // Name and type are to be determined
+				// Find start of parameter signature
+				start = find('<', start, stop);
+				if (start == NULL) break;
 
-			// Parse name
-			next_start = parse_parameter_name_type(current_p, next_start, stop);
-			if (next_start == NULL) {
-				printf("Error: parameter with unexpected name or type\n");
-				exit(1);
+				// Make new list entry
+				list->next = (ParameterList*) malloc(sizeof(ParameterList));
+				list->next->prev = list;
+				list = list->next;
+				current_p = &(list->p);
+
+				// Parse name
+				start = parse_parameter_name_type(current_p, start, stop);
+				if (start == NULL) {
+					printf("Error: parameter with unexpected name or type\n");
+					exit(1);
+				}
+			}
+			else if (mode & copy_type) {
+				list->next = (ParameterList*) malloc(sizeof(ParameterList));
+				list->next->prev = list;
+				list = list->next;
+				current_p = &(list->p);
+				copy_parameter_type(current_p, &(list->prev->p));
+			}
+			else { // Name and type are determined by ParamArray
+				list = list->next;
+				current_p = &(list->p);
 			}
 
 			// Find enclosing scope
-			next_start = find('{', next_start, stop);
-			if (next_start == NULL) {
+			start = find('{', start, stop);
+			if (start == NULL) {
 				printf("Error: parameter without content\n");
 				exit(1);
 			}
-			char* closing_brace = find_matching(next_start, '}');
+			char* closing_brace = find_matching(start, '}');
 
 			// Parse content
-			parse_parameter_content(current_p, next_start, closing_brace, istype);
-			next_start = closing_brace + 1;
+			// Content of a map is parsed no matter if ParamArray or not
+			parse_parameter_content(current_p, start, closing_brace, mode & (~copy_type));
+			start = closing_brace + 1;
+			start += strspn(start, " \n\r\t");
 		}
 	}
 	else if (strcmp(p->type, "ParamArray") == 0) {
-		// Check signature
-		start = find('<', start, stop) + 1;
-		char signature[] = "Default> ";
-		size_t signature_length = sizeof(signature)-1;
-		if (strncmp(start, signature, signature_length) != 0) {
-			printf("Error: parameter array with unexpected signature\n");
-			debug(start, sizeof(signature));
+		if (mode & parse_type) {
+			// Check signature
+			start = find('<', start, stop) + 1;
+			char signature[] = "Default> ";
+			size_t signature_length = sizeof(signature)-1;
+			if (strncmp(start, signature, signature_length) != 0) {
+				printf("Error: parameter array with unexpected signature\n");
+				debug(start, sizeof(signature));
+			}
+			start += sizeof(signature)-1;
 		}
-		start += sizeof(signature)-1;
 
 		char *type_closing_brace = find_matching(start, '}');
 
-		// Parse name and type
-		Parameter* p_array_element = (Parameter*)malloc(sizeof(Parameter));
-		start = parse_parameter_name_type(p_array_element, start, type_closing_brace);
-		parse_parameter_content(p_array_element, start, type_closing_brace, true);
-		//printf("%s\n", p_array_element->type);
+		if (mode & parse_type && mode & parse_content) {
+			// The elements of the ParamArray will be loaded into a ParamMap, which is set up here
 
-		// Parse content
-		// Copy p_array_element for next element
-		// finally put into p->content
-	}
-	else if (strcmp(p->type, "ParamString") == 0) {
-		char *str_start = find('"', start, stop);
-		if (str_start == NULL) {
-			p->content = NULL;
-			return;
+			// Create ParamMap with list in contents
+			Parameter *p_array = (Parameter*) malloc(sizeof(Parameter));
+			strcpy(p_array->type, "ParamMap");
+			p_array->name[0] = '\0'; // No name necessary
+			ParameterList *list = (ParameterList *)malloc(sizeof(ParameterList));
+			list->prev = NULL;
+			list->next = NULL;
+			p_array->content = (void *) list;
+
+			// Reference this parameter in contents of p
+			p->content = (void *) p_array;
+
+			// Parse array type and put into the ParamMap list 
+			Parameter* p_array_element = &(list->p);
+			start = parse_parameter_name_type(p_array_element, start, type_closing_brace);
+			parse_parameter_content(p_array_element, start, type_closing_brace, parse_type);
+
+			// Advance pointer to after the ParamArray type definition
+			start = type_closing_brace + 1;
+			// Parse the ParamArray contents
+			parse_parameter_content(p_array, start, stop, parse_content | copy_type);
 		}
-		str_start += 1;
-		char *str_stop = find('"', str_start, stop);
-		size_t str_len = str_stop - str_start;
-		char *content = (char *) malloc(str_len+1);
-		memcpy(content, str_start, str_len);
-		content[str_len] = '\0';
-		p->content = (void *) content;
-		//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
-	}
-	else if (!istype && strcmp(p->type, "ParamLong") == 0) {
-		start += strspn(start, " \n\r\t");
-		stop = start + strspn(start, "-0123456789");
-		if (start == stop) {
-			p->content = NULL;
-			return;
+		else if (mode & parse_content) {
+			// ParamArray inside a ParamArray, it has been transformed to a ParamMap,
+			// just need to follow a reference
+			parse_parameter_content((Parameter *)p->content, start, stop, parse_content);
 		}
-		int64_t *content = (int64_t *) &(p->content);
-		*content = strtol(start, NULL, 10);
-		//printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
 	}
-	else if (!istype && strcmp(p->type, "ParamDouble") == 0) {
-		start += strspn(start, " \n\r\t");
-		stop = start + strspn(start, "-.0123456789");
-		if (start == stop) {
-			p->content = NULL;
-			return;
+	else if (mode & parse_content) { // Atomic parameters
+		if (strcmp(p->type, "ParamString") == 0) {
+			char *str_start = find('"', start, stop);
+			if (str_start == NULL) {
+				p->content = NULL;
+				return;
+			}
+			str_start += 1;
+			char *str_stop = find('"', str_start, stop);
+			size_t str_len = str_stop - str_start;
+			char *content = (char *) malloc(str_len+1);
+			memcpy(content, str_start, str_len);
+			content[str_len] = '\0';
+			p->content = (void *) content;
+			//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
 		}
-		double *content = (double *) &(p->content);
-		*content = strtod(start, NULL);
-		//printf("%s %s %lf\n", p->name, p->type, (double) *content);
+		else if (strcmp(p->type, "ParamLong") == 0) {
+			start += strspn(start, " \n\r\t");
+			stop = start + strspn(start, "-0123456789");
+			if (start == stop) {
+				p->content = NULL;
+				return;
+			}
+			int64_t *content = (int64_t *) &(p->content);
+			*content = strtol(start, NULL, 10);
+			//printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
+		}
+		else if (strcmp(p->type, "ParamDouble") == 0) {
+			start += strspn(start, " \n\r\t");
+			stop = start + strspn(start, "-.0123456789");
+			if (start == stop) {
+				p->content = NULL;
+				return;
+			}
+			double *content = (double *) &(p->content);
+			*content = strtod(start, NULL);
+			//printf("%s %s %lf\n", p->name, p->type, (double) *content);
+		}
+		else {
+			// Throw error when finished with all types
+		}
 	}
 	else {
-		// Throw error when finished with all types
+		// TODO
 	}
 	return;
 }
@@ -284,7 +375,7 @@ int main(int argc, char* argv[]) {
 		Parameter *p = (Parameter *) malloc(sizeof(Parameter));
 		strcpy(p->name, "XProtocol");
 		strcpy(p->type, "ParamMap");
-		parse_parameter_content(p, start, stop, false);
+		parse_parameter_content(p, start, stop, parse_type | parse_content);
 	}
 
 	return 0;
