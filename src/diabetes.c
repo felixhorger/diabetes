@@ -322,6 +322,28 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			*content = strtod(start, NULL);
 			//printf("%s %s %lf\n", p->name, p->type, (double) *content);
 		}
+		else if (strcmp(p->type, "ParamBool") == 0) {
+			char *str_start = find('"', start, stop);
+			if (str_start == NULL) {
+				p->content = NULL;
+				return;
+			}
+			str_start += 1;
+			char *str_stop = find('"', str_start, stop);
+			size_t str_len = str_stop - str_start;
+			char *content = (char *) malloc(str_len+1);
+			memcpy(content, str_start, str_len);
+			content[str_len] = '\0';
+			bool value;
+			if (strcmp(content, "true") == 0) value = true;
+			else if (strcmp(content, "false") == 0) value = false;
+			else {
+				printf("Error: invalid value for ParamBool \"%s\"\n", content);
+				exit(1);
+			}
+			p->content = (void *) value;
+			//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
+		}
 		else {
 			// Throw error when finished with all types
 		}
