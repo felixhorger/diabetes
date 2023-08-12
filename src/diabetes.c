@@ -87,7 +87,33 @@ void read_protocol(FILE* f, char** start, char** stop) {
 	return;
 }
 
-
+void check_parameter(Parameter *p, char *type) {
+	if (p == NULL) {
+		printf("Error: parameter is NULL pointer\n");
+		exit(1);
+	}
+	if (strncmp(p->type, type, PARAMETER_TYPE_LEN) != 0) {
+		printf("Error: wrong parameter type\n");
+		exit(1);
+	}
+	return;
+}
+double get_double_parameter(Parameter *p) {
+	check_parameter(p, "ParamDouble");
+	return *((double *)&(p->content));
+}
+long get_long_parameter(Parameter *p) {
+	check_parameter(p, "ParamLong");
+	return *((long *)&(p->content));
+}
+bool get_bool_parameter(Parameter *p) {
+	check_parameter(p, "ParamBool");
+	return *((bool *)&(p->content));
+}
+char *get_string_parameter(Parameter *p) {
+	check_parameter(p, "ParamString");
+	return (char *) p->content;
+}
 
 void print_parameter(Parameter *p) {
 	if (p == NULL) {
@@ -95,10 +121,10 @@ void print_parameter(Parameter *p) {
 		exit(1);
 	}
 	printf("%s %s", p->type, p->name);
-	if (strcmp(p->type, "ParamDouble") == 0) printf(" = %lf", *((double *)&(p->content)));
-	else if (strcmp(p->type, "ParamLong") == 0) printf(" = %li", *((long *)&(p->content)));
-	else if (strcmp(p->type, "ParamBool") == 0) printf(" = %c", *((char *)&(p->content)));
-	else if (strcmp(p->type, "ParamString") == 0) printf(" = %s", (char *) p->content);
+	if (strcmp(p->type, "ParamDouble") == 0) printf(" = %lf", get_double_parameter(p));
+	else if (strcmp(p->type, "ParamLong") == 0) printf(" = %li", get_double_parameter(p));
+	else if (strcmp(p->type, "ParamBool") == 0) printf(" = %c", get_bool_parameter(p));
+	else if (strcmp(p->type, "ParamString") == 0) printf(" = %s", get_string_parameter(p));
 	printf("\n");
 	return;
 }
@@ -343,7 +369,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	//printf("%s %s\n", p->name, p->type);
 	if (strcmp(p->type, "ParamMap") == 0 || strcmp(p->type, "Pipe") == 0) {
 		parse_parameter_list(p, start, stop, mode);
-		//printf("%s %s\n", p->name, p->type);
+		printf("%s %s\n", p->name, p->type);
 	}
 	else if (strcmp(p->type, "ParamArray") == 0) {
 		// Parse the type signature
@@ -402,7 +428,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			// Parse the ParamArray contents, but also need to copy type
 			parse_parameter_content((Parameter *)p->content, start, stop, parse_content | copy_type);
 		}
-		//printf("%s %s\n", p->name, p->type);
+		printf("%s %s\n", p->name, p->type);
 	}
 	else if (strcmp(p->type, "ParamFunctor") == 0 || strcmp(p->type, "PipeService") == 0) {
 		if (mode & parse_type) {
@@ -443,7 +469,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		
 		// TODO: can a functor be in a ParamArray?
 		if (mode & parse_content) parse_parameter_list((Parameter *) p->content, start, stop, mode);
-		//printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
+		printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
 	}
 	else if (mode & parse_content) { // Atomic parameters
 		if (strcmp(p->type, "ParamString") == 0) {
@@ -459,7 +485,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			memcpy(content, str_start, str_len);
 			content[str_len] = '\0';
 			p->content = (void *) content;
-			//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
+			printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
 		}
 		else if (strcmp(p->type, "ParamLong") == 0) {
 			start += strspn(start, " \n\r\t");
@@ -470,7 +496,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			}
 			int64_t *content = (int64_t *) &(p->content);
 			*content = strtol(start, NULL, 10);
-			//printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
+			printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
 		}
 		else if (strcmp(p->type, "ParamDouble") == 0) {
 			start += strspn(start, " \n\r\t");
@@ -481,7 +507,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			}
 			double *content = (double *) &(p->content);
 			*content = strtod(start, NULL);
-			//printf("%s %s %lf\n", p->name, p->type, (double) *content);
+			printf("%s %s %lf\n", p->name, p->type, (double) *content);
 		}
 		else if (strcmp(p->type, "ParamBool") == 0) {
 			char *str_start = find('"', start, stop);
@@ -503,7 +529,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 				exit(1);
 			}
 			p->content = (void *) value;
-			//printf("%s %s %d\n", p->name, p->type, (size_t) p->content);
+			printf("%s %s %d\n", p->name, p->type, (size_t) p->content);
 		}
 		else {
 			//printf("%s\n", p->type);
@@ -561,75 +587,10 @@ int main(int argc, char* argv[]) {
 		Parameter *p = (Parameter *) calloc(1, sizeof(Parameter));
 		strcpy(p->name, "XProtocol");
 		strcpy(p->type, "ParamMap");
-
-		char teststr[] = "\
-            {\
-            <ParamArray.\"CoilSelectInfo\"> \
-            {\
-              <Default> <ParamArray.\"\"> \
-              {\
-                <Visible> \"true\" \
-                <MinSize> 0 \
-                <MaxSize> 2147483647 \
-                <Default> <ParamMap.\"\"> \
-                {\
-                  <Visible> \"true\" \
-                  \
-                  <ParamString.\"CoilElementID\"> \
-                  {\
-                    <Visible> \"true\" \
-                  }\
-                  \
-                  <ParamDouble.\"dFFTScale\"> \
-                  {\
-                    <Visible> \"true\" \
-                    <Precision> 16 \
-                  }\
-                  \
-                  <ParamDouble.\"dRawDataCorrectionFactorRe\"> \
-                  {\
-                    <Visible> \"true\" \
-                    <Precision> 16 \
-                  }\
-                  \
-                  <ParamDouble.\"dRawDataCorrectionFactorIm\"> \
-                  {\
-                    <Visible> \"true\" \
-                    <Precision> 16 \
-                  }\
-                }\
-                \
-              }\
-              { {  { \"A01\"  } { 1.0063970000000000  } { -7.7776839999999998  } { 4.2024840000000001  } } {  { \"A02\"  } { 1.0214580000000000  } { -7.7313019999999995  } { 4.3040120000000002  } } {  { \"A03\"  } { 0.9814700000000000  } { -7.8821490000000001  } { 4.0604509999999996  } } {  { \"A04\"  } { 0.9962740000000000  } { -7.7107419999999998  } { 4.3579889999999999  } } {  { \"A05\"  } { 0.9785020000000000  } { -7.8518989999999995  } { 4.0017480000000001  } } {  { \"A06\"  } { 0.9629940000000000  } { -7.7567800000000000  } { 4.2856999999999994  } } {  { \"A07\"  } { 0.9849390000000000  } { -7.8389579999999999  } { 4.0383329999999997  } } {  { \"A08\"  } { 0.9507220000000000  } { -7.7561320000000000  } { 4.3015029999999994  } } {  { \"A09\"  } { 0.9639350000000000  } { -7.2644319999999993  } { 5.0346679999999999  } } {  { \"A10\"  } { 0.9993720000000000  } { -7.1290839999999998  } { 5.1460520000000001  } } {  { \"A11\"  } { 1.0631610000000000  } { -7.2359960000000001  } { 5.0640429999999999  } } {  { \"A12\"  } { 1.0694319999999999  } { -7.0309070000000000  } { 5.2223379999999997  } } {  { \"A13\"  } { 1.0859680000000000  } { -7.2492190000000001  } { 4.9764379999999999  } } {  { \"A14\"  } { 1.0742160000000001  } { -7.0394099999999993  } { 5.1660870000000001  } } {  { \"A15\"  } { 1.0689219999999999  } { -7.2280429999999996  } { 5.0519780000000001  } } {  { \"A16\"  } { 1.0908350000000000  } { -7.0921889999999994  } { 5.1812749999999994  } } {  { \"A17\"  } { 1.1015679999999999  } { -7.2840579999999999  } { 5.0291679999999994  } } {  { \"A18\"  } { 1.1204229999999999  } { -6.9537629999999995  } { 5.2546400000000002  } } {  { \"A19\"  } { 1.1108339999999999  } { -7.2677569999999996  } { 5.0479469999999997  } } {  { \"A20\"  } { 1.1449879999999999  } { -7.0654079999999997  } { 5.2603039999999996  } } {  { \"A21\"  } { 1.1052810000000000  } { -7.1922199999999998  } { 5.0266519999999995  } } {  { \"A22\"  } { 1.0577939999999999  } { -7.0463639999999996  } { 5.2058529999999994  } } {  { \"A23\"  } { 1.0120460000000000  } { -7.2657829999999999  } { 5.0271989999999995  } } {  { \"A24\"  } { 0.9741040000000000  } { -7.0701640000000001  } { 5.2194739999999999  } } {  { \"A25\"  } { 1.0269169999999999  } { -7.2476339999999997  } { 5.0379819999999995  } } {  { \"A26\"  } { 1.0486530000000001  } { -7.0559289999999999  } { 5.2387889999999997  } } {  { \"A27\"  } { 1.0992590000000000  } { -7.2449819999999994  } { 5.0772129999999995  } } {  { \"A28\"  } { 1.0660520000000000  } { -7.1237990000000000  } { 5.1372339999999994  } } {  { \"A29\"  } { 0.9929330000000000  } { -7.2851949999999999  } { 5.0210229999999996  } } {  { \"A30\"  } { 0.9519710000000000  } { -7.0911589999999993  } { 5.2564649999999995  } } {  { \"A31\"  } { 0.9700440000000000  } { -7.2865759999999993  } { 5.0442789999999995  } } {  { \"A32\"  } { 0.9589390000000000  } { -7.1160059999999996  } { 5.2223759999999997  } }  }\
-              \
-            }\
-			}\
-		";
-		char *test = (char *) malloc(sizeof(teststr));
-		strcpy(test, teststr);
-		start = test;
-		stop = start + sizeof(teststr) - 2;
-
-
-		
 		parse_parameter_content(p, start, stop, parse_type | parse_content);
 
-		p = &(((ParameterList *)p->content)->next->p);
-
-		print_parameter(p);
-		print_parameter(index_parameter_array(p, 0));
-		print_parameter(index_parameter_array(index_parameter_array(p, 0), 0));
-		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 0));
-		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 1));
-		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 2));
-		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 3));
-
-		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 0), 0));
-		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 0), 1));
-		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 1), 0));
-		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 1), 1));
+		//
 	}
-
 	return 0;
 }
 
