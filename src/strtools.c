@@ -13,17 +13,6 @@ char* find(char c, char *start, char *stop) {
 	else return start;
 }
 
-//char* findfirstnot(int (*notfound)(int), char *str, char *stop, int incr) {
-//	if (incr != 1 && incr != -1) return NULL;
-//	if (str == NULL || stop == NULL || (size_t)(stop) * incr <= (size_t)(str) * incr) return NULL;
-//	while (str != stop && *str != '\0' && notfound(*str)) str += incr;
-//	return str;
-//}
-
-
-
-
-
 
 /*
 	Looks for a char c in str, that matches *str in a sense
@@ -40,20 +29,4 @@ char* find_matching(char* str, char c) {
 	if (*str != c) return NULL;
 	else return str;
 }
-
-
-
-//void find_matching_braces(char *str, size_t n, char **opening, char **closing) {
-//	*opening = find('{', str, str+n);
-//	if (**opening != '{') {
-//		printf("Error: opening brace not found\n");
-//		exit(1);
-//	}
-//	*closing = find_matching(*opening, '}');
-//	if (*closing != NULL && **closing != '}') {
-//		printf("Error: closing brace not found\n");
-//		exit(1);
-//	}
-//	return;
-//}
 

@@ -67,22 +67,37 @@ void read_protocol(FILE* f, char** start, char** stop) {
 	str = malloc(len);
 	safe_fread(str, len, f);
 
-	// Check initial signature
-	char signature[] = "<XProtocol>";
-	size_t signature_length = sizeof(signature)-1;
-	if (strncmp(str, signature, signature_length) != 0) {
-		printf("Error: parameter string doesn't start as expected:\n");
-		debug(str, signature_length);
-		printf("\n");
-		exit(1);
+	if (strcmp(name, "MeasYaps") == 0) {
+		// Check initial signature
+		char signature[] = "### ASCCONV BEGIN ";
+		size_t signature_length = sizeof(signature)-1;
+		if (strncmp(str, signature, signature_length) != 0) {
+			printf("Error: parameter string doesn't start as expected:\n");
+			debug(str, signature_length);
+			printf("\n");
+			exit(1);
+		}
+		*start = strstr(str + signature_length, " ###") + 4;
+		*stop = *start + len - sizeof("### ASCCONV END ###") - 132; // Mysterious offset :(
 	}
+	else {
+		// Check initial signature
+		char signature[] = "<XProtocol>";
+		size_t signature_length = sizeof(signature)-1;
+		if (strncmp(str, signature, signature_length) != 0) {
+			printf("Error: parameter string doesn't start as expected:\n");
+			debug(str, signature_length);
+			printf("\n");
+			exit(1);
+		}
 
-	// Set new start and stop pointers of string
-	*start = find('{', str, str+len-1);
-	*stop = find('}', str+len-1, str);
-	if (*start == NULL || *stop == NULL) {
-		printf("Error: could not find enclosing braces of outer scope\n");
-		exit(1);
+		// Set new start and stop pointers of string
+		*start = find('{', str, str+len-1);
+		*stop = find('}', str+len-2, str);
+		if (*start == NULL || *stop == NULL) {
+			printf("Error: could not find enclosing braces of outer scope\n");
+			exit(1);
+		}
 	}
 	return;
 }
@@ -369,7 +384,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	//printf("%s %s\n", p->name, p->type);
 	if (strcmp(p->type, "ParamMap") == 0 || strcmp(p->type, "Pipe") == 0) {
 		parse_parameter_list(p, start, stop, mode);
-		printf("%s %s\n", p->name, p->type);
+		//printf("%s %s\n", p->name, p->type);
 	}
 	else if (strcmp(p->type, "ParamArray") == 0) {
 		// Parse the type signature
@@ -428,7 +443,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			// Parse the ParamArray contents, but also need to copy type
 			parse_parameter_content((Parameter *)p->content, start, stop, parse_content | copy_type);
 		}
-		printf("%s %s\n", p->name, p->type);
+		//printf("%s %s\n", p->name, p->type);
 	}
 	else if (strcmp(p->type, "ParamFunctor") == 0 || strcmp(p->type, "PipeService") == 0) {
 		if (mode & parse_type) {
@@ -469,7 +484,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		
 		// TODO: can a functor be in a ParamArray?
 		if (mode & parse_content) parse_parameter_list((Parameter *) p->content, start, stop, mode);
-		printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
+		//printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
 	}
 	else if (mode & parse_content) { // Atomic parameters
 		if (strcmp(p->type, "ParamString") == 0) {
@@ -485,7 +500,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			memcpy(content, str_start, str_len);
 			content[str_len] = '\0';
 			p->content = (void *) content;
-			printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
+			//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
 		}
 		else if (strcmp(p->type, "ParamLong") == 0) {
 			start += strspn(start, " \n\r\t");
@@ -496,7 +511,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			}
 			int64_t *content = (int64_t *) &(p->content);
 			*content = strtol(start, NULL, 10);
-			printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
+			//printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
 		}
 		else if (strcmp(p->type, "ParamDouble") == 0) {
 			start += strspn(start, " \n\r\t");
@@ -507,7 +522,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			}
 			double *content = (double *) &(p->content);
 			*content = strtod(start, NULL);
-			printf("%s %s %lf\n", p->name, p->type, (double) *content);
+			//printf("%s %s %lf\n", p->name, p->type, (double) *content);
 		}
 		else if (strcmp(p->type, "ParamBool") == 0) {
 			char *str_start = find('"', start, stop);
@@ -529,7 +544,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 				exit(1);
 			}
 			p->content = (void *) value;
-			printf("%s %s %d\n", p->name, p->type, (size_t) p->content);
+			//printf("%s %s %d\n", p->name, p->type, (size_t) p->content);
 		}
 		else {
 			//printf("%s\n", p->type);
@@ -572,24 +587,26 @@ int main(int argc, char* argv[]) {
 	safe_fread(&file_header, sizeof(file_header), f);
 
 	// Iterate measurements
-	for (int i = 0; i < file_header.num; i++) {
+	for (int scan = 0; scan < file_header.num; scan++) {
 		// Read measurement header
-		uint64_t position = file_header.entries[i].offset;
+		uint64_t position = file_header.entries[scan].offset;
 		fseek(f, position, SEEK_SET);
 		MeasurementHeader measurement_header;
 		safe_fread(&measurement_header, sizeof(MeasurementHeader), f);
 
-		// Read protocol into string
-		char *start, *stop;
-		read_protocol(f, &start, &stop);
-
-		// Parse protocol
-		Parameter *p = (Parameter *) calloc(1, sizeof(Parameter));
-		strcpy(p->name, "XProtocol");
-		strcpy(p->type, "ParamMap");
-		parse_parameter_content(p, start, stop, parse_type | parse_content);
-
-		//
+		for (int header = 0; header < measurement_header.len; header++) {
+			// Read protocol into string
+			char *start, *stop;
+			read_protocol(f, &start, &stop);
+			here, need to get name from read_protocol, store it somewhere, maybe instead of xprotocol?
+			then depending on name, if MeasYaps then do different parsing
+			Phoenix just skip completely
+			// Parse protocol
+			Parameter *p = (Parameter *) calloc(1, sizeof(Parameter));
+			strcpy(p->name, "XProtocol");
+			strcpy(p->type, "ParamMap");
+			//parse_parameter_content(p, start, stop, parse_type | parse_content);
+		}
 	}
 	return 0;
 }
