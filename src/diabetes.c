@@ -30,9 +30,13 @@ typedef struct FileHeader {
 	ScanHeader entries[64];
 } FileHeader;
 
+
+#define PARAMETER_NAME_LEN 64
+#define PARAMETER_TYPE_LEN 16
+
 typedef struct Parameter {
-	char type[12];
-	char name[24];
+	char type[PARAMETER_TYPE_LEN];
+	char name[PARAMETER_NAME_LEN];
 	void *content;
 } Parameter;
 
@@ -83,13 +87,66 @@ void read_protocol(FILE* f, char** start, char** stop) {
 	return;
 }
 
+
+
+void print_parameter(Parameter *p) {
+	if (p == NULL) {
+		printf("Error: NULL pointer given\n");
+		exit(1);
+	}
+	printf("%s %s", p->type, p->name);
+	if (strcmp(p->type, "ParamDouble") == 0) printf(" = %lf", *((double *)&(p->content)));
+	else if (strcmp(p->type, "ParamLong") == 0) printf(" = %li", *((long *)&(p->content)));
+	else if (strcmp(p->type, "ParamBool") == 0) printf(" = %c", *((char *)&(p->content)));
+	else if (strcmp(p->type, "ParamString") == 0) printf(" = %s", (char *) p->content);
+	printf("\n");
+	return;
+}
+
+Parameter* index_parameter_map(Parameter *p, int i) {
+	if (p == NULL) {
+		printf("Error: NULL pointer given\n");
+		exit(1);
+	}
+	if (strcmp(p->type, "ParamMap") != 0) {
+		printf("Error: not a ParamArray\n");
+		exit(1);
+	}
+	ParameterList *list = (ParameterList *) p->content;
+	if (i == -1) return &(list->p); // Special, because first element is used for type
+	// All others follow
+	for (int j = -1; j < i; j++) {
+		list = list->next;
+		if (list == NULL) {
+			printf("Error: parameter array index %d out of bounds\n", i);
+			exit(1);
+		}
+	}
+	return &(list->p);
+}
+
+Parameter* index_parameter_array(Parameter *p, int i) {
+	if (p == NULL) {
+		printf("Error: NULL pointer given\n");
+		exit(1);
+	}
+	if (strcmp(p->type, "ParamArray") != 0) {
+		printf("Error: not a ParamArray\n");
+		exit(1);
+	}
+	Parameter *p_array = (Parameter *) p->content;
+	return index_parameter_map(p_array, i);
+}
+
 char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
 
 	// Strip spaces
 	start += strspn(start, " \n\r\t") + 1; // +1 because of <
 
 	// Parse type
-	for (int i = 0; i < sizeof(p->type); i++) {
+	int i;
+	//debug(start, stop-start);
+	for (i = 0; i < PARAMETER_TYPE_LEN; i++) {
 		char c = *start;
 		start++;
 		if (*start == '\0') {
@@ -102,8 +159,9 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
 		}
 		p->type[i] = c;
 	}
-	if (p->type[sizeof(p->type)] != '\0') {
-		printf("Error: parameter type unexpectedly long");
+	if (i == PARAMETER_TYPE_LEN) {
+		printf("Error: parameter type unexpectedly long:\n");
+		debug(p->type, PARAMETER_TYPE_LEN);
 		exit(1);
 	}
 
@@ -117,7 +175,7 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
 	size_t diff = closing_quote - start;
 	if (diff > 0) {
 		strncpy(p->name, start, diff);
-		p->name[diff+1] = '\0';
+		p->name[diff] = '\0';
 	}
 	else {
 		p->name[0] = '\0';
@@ -125,29 +183,29 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop) {
 	return start + 2; // ">
 }
 
-Parameter copy_parameter_type(Parameter *dest, Parameter *src) {
+void copy_parameter_type(Parameter *dest, Parameter *src) {
 	strcpy(dest->name, src->name);
 	strcpy(dest->type, src->type);
 	if (strcmp(src->type, "ParamMap") == 0) {
-		ParameterList *list = (ParameterList*) malloc(sizeof(ParameterList));
-		list->prev = NULL;
+		ParameterList *list = (ParameterList*) calloc(1, sizeof(ParameterList));
 		dest->content = (void*) list;
 		ParameterList *src_list = (ParameterList*) src->content;
-		while (src_list != NULL) {
-			// Add new element to destination list and advance to it
-			list->next = (ParameterList*) malloc(sizeof(ParameterList));
-			list->next->prev = list;
-			list = list->next;
+		while (true) {
+			//print_parameter(&(src_list->p));
 			// Copy list entry
 			copy_parameter_type(&(list->p), &(src_list->p));
 			// Advance source list
 			src_list = src_list->next;
+			if (src_list == NULL) break;
+			// Add new element to destination list and advance to it
+			list->next = (ParameterList*) calloc(1, sizeof(ParameterList));
+			list->next->prev = list;
+			list = list->next;
 		}
 	}
 	else if (strcmp(src->type, "ParamArray") == 0) {
-		Parameter *p_array = (Parameter*) malloc(sizeof(Parameter));
+		Parameter *p_array = (Parameter*) calloc(1, sizeof(Parameter));
 		strcpy(p_array->type, "ParamMap");
-		p_array->name[0] = '\0';
 		dest->content = (void *) p_array;
 		copy_parameter_type(p_array, (Parameter*)src->content);
 	}
@@ -158,111 +216,172 @@ Parameter copy_parameter_type(Parameter *dest, Parameter *src) {
 
 enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
 
+void parse_parameter_content();
+
+void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode mode) {
+	// Set up list of parameters
+	ParameterList *list;
+	if (mode & parse_type) {
+		// Make new list, names and types are to be filled in
+		list = (ParameterList*) calloc(1, sizeof(ParameterList));
+		p->content = (void*) list;
+	}
+	else {
+		// For ParamArray, names and types have been filled already (first element)
+		list = (ParameterList*) p->content;
+	}
+	Parameter* current_p;
+
+	// Append all entries to list
+	while (start < stop) {
+		// Parse parameter name and type in case of map, or copy type for array 
+		if (mode & parse_type) { // Name and type are to be determined (map, or array type determination)
+			// Find start of parameter signature
+			// TODO: this breaks if it isn't last in the list
+			bool not_found = true;
+			while (start < stop) {
+				char *next_brace = find('{', start, stop);
+				start = find('<', start, stop);
+				if (start > next_brace) {
+					printf("Error: did not find a valid type\n");
+					exit(1);
+				}
+				if (start == NULL) return;
+				if (strncmp(start+1, "Param", 5) == 0 || strncmp(start+1, "Pipe", 4) == 0) {
+					not_found = false;
+					break;
+				}
+				else if (
+					strncmp(start+1, "Event", 5) == 0 ||
+					strncmp(start+1, "Connection", 10) == 0 ||
+					strncmp(start+1, "Method", 6) == 0
+				) {
+					start = find_matching(next_brace, '}') + 1;
+					continue;
+				}
+				start += 1;
+			}
+			if (not_found) return;
+
+			// Make new list entry
+			list->next = (ParameterList*) calloc(1, sizeof(ParameterList));
+			list->next->prev = list;
+			list = list->next;
+			current_p = &(list->p);
+
+			// Parse name
+			start = parse_parameter_name_type(current_p, start, stop);
+			if (start == NULL) {
+				printf("Error: parameter with unexpected name or type\n");
+				exit(1);
+			}
+		}
+		else if (mode & copy_type) { // Array, need to copy type before parsing content
+			list->next = (ParameterList*) calloc(1, sizeof(ParameterList));
+			list->next->prev = list;
+			list = list->next;
+			current_p = &(list->p);
+			copy_parameter_type(current_p, &(list->prev->p));
+			//printf("copied %s\n", current_p->type);
+			//print_parameter(index_parameter_array(current_p, 0));
+		}
+		else { // Map, advance by first list element
+			list = list->next;
+			if (list == NULL) {
+				printf("Error: ParamArray type definition inconsistent with value \n");
+				exit(1);
+			}
+			current_p = &(list->p);
+		}
+
+		// Find enclosing scope
+		start = find('{', start, stop);
+		if (start == NULL) {
+			if (mode & parse_type) {
+				printf("Error: parameter without content\n");
+				exit(1);
+			}
+			else return;
+		}
+		char* closing_brace = find_matching(start, '}');
+
+		// Parse content
+		// Content of a map is parsed no matter if ParamArray or not
+		parse_parameter_content(current_p, start, closing_brace, mode & (~copy_type));
+		//printf("content parsed %s\n", current_p->type);
+		start = closing_brace + 1;
+		start += strspn(start, " \n\r\t");
+	}
+	return;
+}
+
 // gets {...}
 void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_mode mode) {
-	if ((mode & copy_type) == 0) {
+	if (start == NULL || stop == NULL) {
+		printf("Error: parsing parameter %s: start (%p) or stop (%p) is NULL\n", p->name, start, stop);
+		exit(1);
+	}
+
+	//printf("%s %s %d\n", p->name, p->type, mode);
+	if ((mode & copy_type) == 0) { // is copy_type off?
 		/*	Problem is that with normal ParamMap, there are extra curly braces
 			But with ParamMap used for the ParamArray there aren't.
 			So, they are only to be removed if not parsing the contents of
 			a ParamArray via a ParamMap, i.e. if copy_type is off.
 		*/
-		start = find('{', start, stop) + 1;
-		stop = find('}', stop, start) - 1;
+		start = find('{', start, stop);
+		stop = find('}', stop, start);
+		//debug(start, stop-start);
+		if (start == NULL || stop == NULL) {
+			printf("Error: parsing %s: could not find enclosing braces of parameter scope\n", p->name);
+			exit(1);
+		}
+		start += 1;
+		stop -= 1;
 	}
-	if (start == NULL || stop == NULL) {
-		printf("Error: could not find enclosing braces of parameter scope (%s)\n", p->name);
-		exit(1);
-	}
 
-	printf("%s %s\n", p->type, p->name);
-	if (strcmp(p->type, "ParamMap") == 0) {
-		// Set up list of parameters
-		ParameterList *list;
-		if (mode & parse_type) {
-			// Make new list, names and types are to be filled in
-			list = (ParameterList*) malloc(sizeof(ParameterList));
-			list->prev = NULL;
-			p->content = (void*) list;
-		}
-		else {
-			// For ParamArray, names and types have been filled already (first element)
-			list = (ParameterList*) p->content;
-			if ((mode & copy_type) == 0) list = list->next;
-		}
-		Parameter* current_p;
-
-		// Append all entries to list
-		while (start < stop) {
-			if (mode & parse_type) { // Name and type are to be determined
-				// Find start of parameter signature
-				start = find('<', start, stop);
-				if (start == NULL) break;
-
-				// Make new list entry
-				list->next = (ParameterList*) malloc(sizeof(ParameterList));
-				list->next->prev = list;
-				list = list->next;
-				current_p = &(list->p);
-
-				// Parse name
-				start = parse_parameter_name_type(current_p, start, stop);
-				if (start == NULL) {
-					printf("Error: parameter with unexpected name or type\n");
-					exit(1);
-				}
-			}
-			else if (mode & copy_type) {
-				list->next = (ParameterList*) malloc(sizeof(ParameterList));
-				list->next->prev = list;
-				list = list->next;
-				current_p = &(list->p);
-				copy_parameter_type(current_p, &(list->prev->p));
-			}
-			else { // Name and type are determined by ParamArray
-				list = list->next;
-				current_p = &(list->p);
-			}
-
-			// Find enclosing scope
-			start = find('{', start, stop);
-			if (start == NULL) {
-				printf("Error: parameter without content\n");
-				exit(1);
-			}
-			char* closing_brace = find_matching(start, '}');
-
-			// Parse content
-			// Content of a map is parsed no matter if ParamArray or not
-			parse_parameter_content(current_p, start, closing_brace, mode & (~copy_type));
-			start = closing_brace + 1;
-			start += strspn(start, " \n\r\t");
-		}
+	//printf("%s %s\n", p->name, p->type);
+	if (strcmp(p->type, "ParamMap") == 0 || strcmp(p->type, "Pipe") == 0) {
+		parse_parameter_list(p, start, stop, mode);
+		//printf("%s %s\n", p->name, p->type);
 	}
 	else if (strcmp(p->type, "ParamArray") == 0) {
+		// Parse the type signature
 		if (mode & parse_type) {
-			// Check signature
-			start = find('<', start, stop) + 1;
+			// Find type signature
+			// TODO: this breaks if it isn't last in the list
 			char signature[] = "Default> ";
 			size_t signature_length = sizeof(signature)-1;
-			if (strncmp(start, signature, signature_length) != 0) {
-				printf("Error: parameter array with unexpected signature\n");
-				debug(start, sizeof(signature));
+			bool not_found = true;
+			while (start < stop) {
+				start = find('<', start, stop);
+				// TODO check for NULL
+				if (strncmp(start+1, signature, signature_length) == 0) {
+					not_found = false;
+					break;
+				}
+				start += sizeof(signature);
 			}
-			start += sizeof(signature)-1;
+			if (not_found) {
+				printf("Error: parameter array with unexpected signature\n");
+				exit(1);
+			}
+			start += sizeof(signature);
 		}
 
-		char *type_closing_brace = find_matching(start, '}');
+		// Find matching closing brace
+		char *type_opening_brace = find('{', start+1, stop);
+		char *type_closing_brace = find_matching(type_opening_brace, '}');
 
-		if (mode & parse_type && mode & parse_content) {
+		// Parsing type of ParamArray
+		if (mode & parse_type) {
 			// The elements of the ParamArray will be loaded into a ParamMap, which is set up here
 
 			// Create ParamMap with list in contents
-			Parameter *p_array = (Parameter*) malloc(sizeof(Parameter));
+			Parameter *p_array = (Parameter*) calloc(1, sizeof(Parameter));
 			strcpy(p_array->type, "ParamMap");
 			p_array->name[0] = '\0'; // No name necessary
-			ParameterList *list = (ParameterList *)malloc(sizeof(ParameterList));
-			list->prev = NULL;
-			list->next = NULL;
+			ParameterList *list = (ParameterList *) calloc(1, sizeof(ParameterList));
 			p_array->content = (void *) list;
 
 			// Reference this parameter in contents of p
@@ -272,17 +391,59 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			Parameter* p_array_element = &(list->p);
 			start = parse_parameter_name_type(p_array_element, start, type_closing_brace);
 			parse_parameter_content(p_array_element, start, type_closing_brace, parse_type);
+		}
 
-			// Advance pointer to after the ParamArray type definition
-			start = type_closing_brace + 1;
-			// Parse the ParamArray contents
-			parse_parameter_content(p_array, start, stop, parse_content | copy_type);
+		// Advance pointer to after the ParamArray type definition
+		// This is only the case for the parent ParamArray
+		if (mode & parse_type && mode & parse_content) start = type_closing_brace + 1;
+
+		// Parse content
+		if (mode & parse_content) { // ParamArray inside a ParamArray
+			// Parse the ParamArray contents, but also need to copy type
+			parse_parameter_content((Parameter *)p->content, start, stop, parse_content | copy_type);
 		}
-		else if (mode & parse_content) {
-			// ParamArray inside a ParamArray, it has been transformed to a ParamMap,
-			// just need to follow a reference
-			parse_parameter_content((Parameter *)p->content, start, stop, parse_content);
+		//printf("%s %s\n", p->name, p->type);
+	}
+	else if (strcmp(p->type, "ParamFunctor") == 0 || strcmp(p->type, "PipeService") == 0) {
+		if (mode & parse_type) {
+			// Check signature
+			start = find('<', start, stop) + 1;
+			char signature[] = "Class> ";
+			size_t signature_length = sizeof(signature)-1;
+			if (strncmp(start, signature, signature_length) != 0) {
+				printf("Error: functor with unexpected signature\n");
+				debug(start, sizeof(signature));
+			}
+			start += sizeof(signature)-1;
+
+			// Create ParamMap with list in contents
+			Parameter *p_functor = (Parameter*) calloc(1, sizeof(Parameter));
+			strcpy(p_functor->type, "ParamMap");
+			// Reference this parameter in contents of p
+			p->content = (void *) p_functor;
+
+			// Parse functor name
+			{
+				start = find('"', start, stop);
+				start += 1;
+				char *closing_quote = find('"', start, stop);
+				// TODO: check for null start and closing
+				size_t len = closing_quote-start;
+				if (len > PARAMETER_NAME_LEN) {
+					printf("Error: parameter name too long\n");
+					debug(start, len);
+					exit(1);
+				}
+				strncpy(p_functor->name, start, len);
+				p_functor->name[len+1] = '\0';
+				start = closing_quote + 1;
+			}
+
 		}
+		
+		// TODO: can a functor be in a ParamArray?
+		if (mode & parse_content) parse_parameter_list((Parameter *) p->content, start, stop, mode);
+		//printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
 	}
 	else if (mode & parse_content) { // Atomic parameters
 		if (strcmp(p->type, "ParamString") == 0) {
@@ -342,9 +503,10 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 				exit(1);
 			}
 			p->content = (void *) value;
-			//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
+			//printf("%s %s %d\n", p->name, p->type, (size_t) p->content);
 		}
 		else {
+			//printf("%s\n", p->type);
 			// Throw error when finished with all types
 		}
 	}
@@ -353,6 +515,8 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	}
 	return;
 }
+
+
 
 
 
@@ -394,10 +558,76 @@ int main(int argc, char* argv[]) {
 		read_protocol(f, &start, &stop);
 
 		// Parse protocol
-		Parameter *p = (Parameter *) malloc(sizeof(Parameter));
+		Parameter *p = (Parameter *) calloc(1, sizeof(Parameter));
 		strcpy(p->name, "XProtocol");
 		strcpy(p->type, "ParamMap");
+
+		char teststr[] = "\
+            {\
+            <ParamArray.\"CoilSelectInfo\"> \
+            {\
+              <Default> <ParamArray.\"\"> \
+              {\
+                <Visible> \"true\" \
+                <MinSize> 0 \
+                <MaxSize> 2147483647 \
+                <Default> <ParamMap.\"\"> \
+                {\
+                  <Visible> \"true\" \
+                  \
+                  <ParamString.\"CoilElementID\"> \
+                  {\
+                    <Visible> \"true\" \
+                  }\
+                  \
+                  <ParamDouble.\"dFFTScale\"> \
+                  {\
+                    <Visible> \"true\" \
+                    <Precision> 16 \
+                  }\
+                  \
+                  <ParamDouble.\"dRawDataCorrectionFactorRe\"> \
+                  {\
+                    <Visible> \"true\" \
+                    <Precision> 16 \
+                  }\
+                  \
+                  <ParamDouble.\"dRawDataCorrectionFactorIm\"> \
+                  {\
+                    <Visible> \"true\" \
+                    <Precision> 16 \
+                  }\
+                }\
+                \
+              }\
+              { {  { \"A01\"  } { 1.0063970000000000  } { -7.7776839999999998  } { 4.2024840000000001  } } {  { \"A02\"  } { 1.0214580000000000  } { -7.7313019999999995  } { 4.3040120000000002  } } {  { \"A03\"  } { 0.9814700000000000  } { -7.8821490000000001  } { 4.0604509999999996  } } {  { \"A04\"  } { 0.9962740000000000  } { -7.7107419999999998  } { 4.3579889999999999  } } {  { \"A05\"  } { 0.9785020000000000  } { -7.8518989999999995  } { 4.0017480000000001  } } {  { \"A06\"  } { 0.9629940000000000  } { -7.7567800000000000  } { 4.2856999999999994  } } {  { \"A07\"  } { 0.9849390000000000  } { -7.8389579999999999  } { 4.0383329999999997  } } {  { \"A08\"  } { 0.9507220000000000  } { -7.7561320000000000  } { 4.3015029999999994  } } {  { \"A09\"  } { 0.9639350000000000  } { -7.2644319999999993  } { 5.0346679999999999  } } {  { \"A10\"  } { 0.9993720000000000  } { -7.1290839999999998  } { 5.1460520000000001  } } {  { \"A11\"  } { 1.0631610000000000  } { -7.2359960000000001  } { 5.0640429999999999  } } {  { \"A12\"  } { 1.0694319999999999  } { -7.0309070000000000  } { 5.2223379999999997  } } {  { \"A13\"  } { 1.0859680000000000  } { -7.2492190000000001  } { 4.9764379999999999  } } {  { \"A14\"  } { 1.0742160000000001  } { -7.0394099999999993  } { 5.1660870000000001  } } {  { \"A15\"  } { 1.0689219999999999  } { -7.2280429999999996  } { 5.0519780000000001  } } {  { \"A16\"  } { 1.0908350000000000  } { -7.0921889999999994  } { 5.1812749999999994  } } {  { \"A17\"  } { 1.1015679999999999  } { -7.2840579999999999  } { 5.0291679999999994  } } {  { \"A18\"  } { 1.1204229999999999  } { -6.9537629999999995  } { 5.2546400000000002  } } {  { \"A19\"  } { 1.1108339999999999  } { -7.2677569999999996  } { 5.0479469999999997  } } {  { \"A20\"  } { 1.1449879999999999  } { -7.0654079999999997  } { 5.2603039999999996  } } {  { \"A21\"  } { 1.1052810000000000  } { -7.1922199999999998  } { 5.0266519999999995  } } {  { \"A22\"  } { 1.0577939999999999  } { -7.0463639999999996  } { 5.2058529999999994  } } {  { \"A23\"  } { 1.0120460000000000  } { -7.2657829999999999  } { 5.0271989999999995  } } {  { \"A24\"  } { 0.9741040000000000  } { -7.0701640000000001  } { 5.2194739999999999  } } {  { \"A25\"  } { 1.0269169999999999  } { -7.2476339999999997  } { 5.0379819999999995  } } {  { \"A26\"  } { 1.0486530000000001  } { -7.0559289999999999  } { 5.2387889999999997  } } {  { \"A27\"  } { 1.0992590000000000  } { -7.2449819999999994  } { 5.0772129999999995  } } {  { \"A28\"  } { 1.0660520000000000  } { -7.1237990000000000  } { 5.1372339999999994  } } {  { \"A29\"  } { 0.9929330000000000  } { -7.2851949999999999  } { 5.0210229999999996  } } {  { \"A30\"  } { 0.9519710000000000  } { -7.0911589999999993  } { 5.2564649999999995  } } {  { \"A31\"  } { 0.9700440000000000  } { -7.2865759999999993  } { 5.0442789999999995  } } {  { \"A32\"  } { 0.9589390000000000  } { -7.1160059999999996  } { 5.2223759999999997  } }  }\
+              \
+            }\
+			}\
+		";
+		char *test = (char *) malloc(sizeof(teststr));
+		strcpy(test, teststr);
+		start = test;
+		stop = start + sizeof(teststr) - 2;
+
+
+		
 		parse_parameter_content(p, start, stop, parse_type | parse_content);
+
+		p = &(((ParameterList *)p->content)->next->p);
+
+		print_parameter(p);
+		print_parameter(index_parameter_array(p, 0));
+		print_parameter(index_parameter_array(index_parameter_array(p, 0), 0));
+		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 0));
+		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 1));
+		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 2));
+		print_parameter(index_parameter_map(index_parameter_array(index_parameter_array(p, 0), 0), 3));
+
+		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 0), 0));
+		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 0), 1));
+		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 1), 0));
+		//print_parameter(index_parameter_array(index_parameter_array(index_parameter_array(p, 0), 1), 1));
 	}
 
 	return 0;

@@ -1,6 +1,7 @@
 
 void debug(char *str, size_t s) {
 	for (int i = 0; i < s; i++) printf("%c", str[i]);
+	printf("\n");
 	return;
 }
 
@@ -30,13 +31,12 @@ char* find(char c, char *start, char *stop) {
 */
 char* find_matching(char* str, char c) {
 	char c0 = *str;
-	int count = 0;
+	int count = 1;
 	do {
+		str++;
 		if (*str == c0) count++;
 		else if (*str == c) count--;
-		str++;
 	} while (*str != '\0' && count != 0);
-	str--;
 	if (*str != c) return NULL;
 	else return str;
 }
