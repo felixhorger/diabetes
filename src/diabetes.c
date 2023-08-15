@@ -281,9 +281,9 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 			while (start < stop) {
 				char *next_brace = find('{', start, stop);
 				char *next_type = find('<', start, stop);
-				if (next_type > next_brace) {
+				if (next_brace != NULL && next_type > next_brace) {
 					printf("Error: did not find a valid type\n");
-					debug(start, min(next_brace-start-1, 128));
+					debug(start, min(128, next_brace-start-1));
 					exit(1);
 				}
 				start = next_type;
@@ -300,6 +300,13 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 					strncmp(start+1, "ProtocolComposer", 16) == 0
 				) {
 					start = find_matching(next_brace, '}') + 1;
+					continue;
+				}
+				else if (strncmp(start+1, "Visible", 7) == 0) {
+					printf("asd\n");
+					start = find('\n', start, stop) + 1;
+					debug(start, 20);
+					printf("basd\n");
 					continue;
 				}
 				start += 1;
@@ -361,6 +368,7 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 // gets {...}
 void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_mode mode) {
 	if (start == NULL || stop == NULL) {
+		p->name[PARAMETER_NAME_LEN] = '\0';
 		printf("Error: parsing parameter %s: start (%p) or stop (%p) is NULL\n", p->name, start, stop);
 		exit(1);
 	}
@@ -483,10 +491,6 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 				p_functor->name[len+1] = '\0';
 				start = closing_quote + 1;
 			}
-
-			// Forward stuff
-			start = find('<', start, stop);
-			if (start != NULL && start[1] == 'V') start = find('\n', start, stop) + 1;
 		}
 		
 		// TODO: can a functor be in a ParamArray?
