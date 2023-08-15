@@ -47,10 +47,9 @@ typedef struct ParameterList {
 	Parameter p;
 } ParameterList;
 
-void read_protocol(FILE* f, char** start, char** stop) {
+void read_protocol(FILE* f, char *name, char** start, char** stop) {
 	// Read config
 	// TODO: what is it useful for?
-	char name[48]; // is this length the actual max?
 	{
 		for (int j = 0; j < 48; j++) {
 			char c = fgetc(f);
@@ -278,15 +277,16 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 		// Parse parameter name and type in case of map, or copy type for array 
 		if (mode & parse_type) { // Name and type are to be determined (map, or array type determination)
 			// Find start of parameter signature
-			// TODO: this breaks if it isn't last in the list
 			bool not_found = true;
 			while (start < stop) {
 				char *next_brace = find('{', start, stop);
-				start = find('<', start, stop);
-				if (start > next_brace) {
+				char *next_type = find('<', start, stop);
+				if (next_type > next_brace) {
 					printf("Error: did not find a valid type\n");
+					debug(start, min(next_brace-start-1, 128));
 					exit(1);
 				}
+				start = next_type;
 				if (start == NULL) return;
 				if (strncmp(start+1, "Param", 5) == 0 || strncmp(start+1, "Pipe", 4) == 0) {
 					not_found = false;
@@ -295,7 +295,9 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 				else if (
 					strncmp(start+1, "Event", 5) == 0 ||
 					strncmp(start+1, "Connection", 10) == 0 ||
-					strncmp(start+1, "Method", 6) == 0
+					strncmp(start+1, "Method", 6) == 0 ||
+					strncmp(start+1, "Dependency", 10) == 0 ||
+					strncmp(start+1, "ProtocolComposer", 16) == 0
 				) {
 					start = find_matching(next_brace, '}') + 1;
 					continue;
@@ -381,12 +383,14 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		stop -= 1;
 	}
 
-	//printf("%s %s\n", p->name, p->type);
+	printf("%s %s\n", p->name, p->type);
 	if (strcmp(p->type, "ParamMap") == 0 || strcmp(p->type, "Pipe") == 0) {
 		parse_parameter_list(p, start, stop, mode);
 		//printf("%s %s\n", p->name, p->type);
 	}
 	else if (strcmp(p->type, "ParamArray") == 0) {
+		// TODO: The below line is for cases where a { } is enough to signify an empty array/map instead of { {} {} ...}
+		if (strcmp(p->name, "RxCoilSelects") == 0 || strcmp(p->name, "aRxCoilSelectData") == 0) return;
 		// Parse the type signature
 		if (mode & parse_type) {
 			// Find type signature
@@ -480,6 +484,9 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 				start = closing_quote + 1;
 			}
 
+			// Forward stuff
+			start = find('<', start, stop);
+			if (start != NULL && start[1] == 'V') start = find('\n', start, stop) + 1;
 		}
 		
 		// TODO: can a functor be in a ParamArray?
@@ -489,10 +496,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	else if (mode & parse_content) { // Atomic parameters
 		if (strcmp(p->type, "ParamString") == 0) {
 			char *str_start = find('"', start, stop);
-			if (str_start == NULL) {
-				p->content = NULL;
-				return;
-			}
+			if (str_start == NULL) return;
 			str_start += 1;
 			char *str_stop = find('"', str_start, stop);
 			size_t str_len = str_stop - str_start;
@@ -505,10 +509,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		else if (strcmp(p->type, "ParamLong") == 0) {
 			start += strspn(start, " \n\r\t");
 			stop = start + strspn(start, "-0123456789");
-			if (start == stop) {
-				p->content = NULL;
-				return;
-			}
+			if (start == stop) return;
 			int64_t *content = (int64_t *) &(p->content);
 			*content = strtol(start, NULL, 10);
 			//printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
@@ -516,20 +517,15 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		else if (strcmp(p->type, "ParamDouble") == 0) {
 			start += strspn(start, " \n\r\t");
 			stop = start + strspn(start, "-.0123456789");
-			if (start == stop) {
-				p->content = NULL;
-				return;
-			}
+			if (start == stop) return;
 			double *content = (double *) &(p->content);
 			*content = strtod(start, NULL);
 			//printf("%s %s %lf\n", p->name, p->type, (double) *content);
 		}
 		else if (strcmp(p->type, "ParamBool") == 0) {
+			char *definitions = find('<', start, stop); // yeah not parsing these
 			char *str_start = find('"', start, stop);
-			if (str_start == NULL) {
-				p->content = NULL;
-				return;
-			}
+			if (str_start == NULL || definitions != NULL) return;
 			str_start += 1;
 			char *str_stop = find('"', str_start, stop);
 			size_t str_len = str_stop - str_start;
@@ -593,19 +589,31 @@ int main(int argc, char* argv[]) {
 		fseek(f, position, SEEK_SET);
 		MeasurementHeader measurement_header;
 		safe_fread(&measurement_header, sizeof(MeasurementHeader), f);
-
+		
+		Parameter *headers = (Parameter*) calloc(measurement_header.len, sizeof(Parameter));
 		for (int header = 0; header < measurement_header.len; header++) {
 			// Read protocol into string
+			Parameter *p = &(headers[header]);
 			char *start, *stop;
-			read_protocol(f, &start, &stop);
-			here, need to get name from read_protocol, store it somewhere, maybe instead of xprotocol?
-			then depending on name, if MeasYaps then do different parsing
-			Phoenix just skip completely
+			char *name = (char*) &(p->name);
+			read_protocol(f, name, &start, &stop);
+			//printf("%s\n", name);
 			// Parse protocol
-			Parameter *p = (Parameter *) calloc(1, sizeof(Parameter));
-			strcpy(p->name, "XProtocol");
+			if (strcmp(name, "Meas") == 0) {
+				start = find('{', start+1, stop);
+				start = find_matching(start, '}');
+				start = find('<', start, stop);
+			}
+			else if (strcmp(name, "MeasYaps") == 0) {
+				// TODO
+				continue;
+			}
+			else if (strcmp(name, "Phoenix") == 0) {
+				// TODO: worth it?
+				continue;
+			}
 			strcpy(p->type, "ParamMap");
-			//parse_parameter_content(p, start, stop, parse_type | parse_content);
+			parse_parameter_content(p, start, stop, parse_type | parse_content);
 		}
 	}
 	return 0;

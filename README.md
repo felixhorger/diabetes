@@ -2,5 +2,5 @@
 
 Can eat twix more rapidely than anyone else.
 
-I'd like a friendly discussion with the person who came up with the protocol structure.
+I'd like a ~~friendly~~ discussion with the person who came up with the protocol structure.
 
