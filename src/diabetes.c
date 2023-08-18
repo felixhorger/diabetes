@@ -18,8 +18,8 @@ typedef struct MeasurementHeader {
 typedef struct ScanHeader {
 	uint32_t id;
 	uint32_t fileid;
-	uint32_t offset;
-	uint32_t len;
+	uint64_t offset;
+	uint64_t len;
 	char patient_name[64];
 	char protocol_name[64];
 } ScanHeader;
@@ -585,6 +585,16 @@ int main(int argc, char* argv[]) {
 	// Get file header
 	FileHeader file_header;
 	safe_fread(&file_header, sizeof(file_header), f);
+	//printf("File header: 1 whatever %d\n 2 num %d\n 3 id %d\n 4 fileid %d\n 5 offset %d\n 6 len %d\n name %s\n prot %s\n",
+	//	file_header.whatever,
+	//	file_header.num,
+	//	file_header.entries[0].id,
+	//	file_header.entries[0].fileid,
+	//	file_header.entries[0].offset,
+	//	file_header.entries[0].len,
+	//	file_header.entries[0].patient_name,
+	//	file_header.entries[0].protocol_name
+	//);
 
 	// Iterate measurements
 	for (int scan = 0; scan < file_header.num; scan++) {
@@ -620,6 +630,7 @@ int main(int argc, char* argv[]) {
 			parse_parameter_content(p, start, stop, parse_type | parse_content);
 		}
 	}
+
 	return 0;
 }
 
