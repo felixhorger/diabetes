@@ -11,8 +11,8 @@
 #include "strtools.c"
 
 typedef struct MeasurementHeader {
-	uint32_t whatever; // Nice
 	uint32_t len;
+	uint32_t num;
 } MeasurementHeader;
 
 typedef struct ScanHeader {
@@ -29,6 +29,37 @@ typedef struct FileHeader {
 	uint32_t num;
 	ScanHeader entries[64];
 } FileHeader;
+
+typedef struct data_header {
+	uint32_t	flags_and_dma_len;
+	int32_t		meas_uid;
+	uint32_t	scan_counter;
+	uint32_t	time_stamp;
+	uint32_t	pmu_timestamp;
+	uint16_t	systemtype;
+	uint16_t	patient_table_pos_delay;
+	int32_t		patient_table_pos_x;
+	int32_t		patient_table_pos_y;
+	int32_t		patient_table_pos_z;
+	int32_t		reserved;
+	uint64_t	eval_info_mask;
+	uint16_t	num_samples;
+	uint16_t	num_channels; // ?
+	LineCounter	counter;
+	CutOff		cut_off;
+	uint16_t	center_col;
+	uint16_t	coil_select;
+	float		readout_offcentre;
+	uint32_t	time_since_last_rf;
+	uint16_t	center_line;
+	uint16_t	center_partition;
+	SliceData	slice_data;
+	uint16_t	ice[24];
+	uint16_t	also_reserved[4];
+	uint16_t	application_counter;
+	uint16_t	application_mask;
+	uint32_t	crc;
+} data_header;
 
 
 #define PARAMETER_NAME_LEN 64
@@ -604,8 +635,9 @@ int main(int argc, char* argv[]) {
 		MeasurementHeader measurement_header;
 		safe_fread(&measurement_header, sizeof(MeasurementHeader), f);
 		
-		Parameter *headers = (Parameter*) calloc(measurement_header.len, sizeof(Parameter));
-		for (int header = 0; header < measurement_header.len; header++) {
+		// Parse headers
+		Parameter *headers = (Parameter*) calloc(measurement_header.num, sizeof(Parameter));
+		for (int header = 0; header < measurement_header.num; header++) {
 			// Read protocol into string
 			Parameter *p = &(headers[header]);
 			char *start, *stop;
@@ -629,7 +661,14 @@ int main(int argc, char* argv[]) {
 			strcpy(p->type, "ParamMap");
 			parse_parameter_content(p, start, stop, parse_type | parse_content);
 		}
+
+		// Read measurement data
+		fseek(f, file_header.entries[0].offset + measurement_header.len, SEEK_SET);
+		safe_fread(&test, 50, f);
+		debug(test, 50);
+
 	}
+
 
 	return 0;
 }
