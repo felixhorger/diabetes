@@ -1,5 +1,5 @@
 
 diabetes: src/*.c
-	gcc -g src/diabetes.c -o diabetes
+	gcc -g src/twixeater.c -o twixeater
 
 	

@@ -1,6 +1,6 @@
-# diabetes - Siemens MRI raw data reader
+# Twix Eater - Siemens MRI Raw Data Reader
 
-Can eat twix more rapidely than anyone else.
+Can eat twix more rapidely than anyone else, even Augustus Gloop.
 
-I'd like a ~~friendly~~ discussion with the person who came up with the protocol structure.
+I'd like a discussion with the person who came up with the protocol structure.
 

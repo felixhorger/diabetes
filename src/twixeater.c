@@ -45,15 +45,15 @@ typedef struct data_header {
 	uint64_t	eval_info_mask;
 	uint16_t	num_samples;
 	uint16_t	num_channels; // ?
-	LineCounter	counter;
-	CutOff		cut_off;
+	//LineCounter	counter;
+	//CutOff		cut_off;
 	uint16_t	center_col;
 	uint16_t	coil_select;
 	float		readout_offcentre;
 	uint32_t	time_since_last_rf;
 	uint16_t	center_line;
 	uint16_t	center_partition;
-	SliceData	slice_data;
+	//SliceData	slice_data;
 	uint16_t	ice[24];
 	uint16_t	also_reserved[4];
 	uint16_t	application_counter;
@@ -594,6 +594,8 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 
 int main(int argc, char* argv[]) {
 	
+	printf("%d\n", sizeof(data_header));
+	return 0;
 	// Open file
 	FILE *f;
 	if (argc < 2) {
@@ -664,8 +666,8 @@ int main(int argc, char* argv[]) {
 
 		// Read measurement data
 		fseek(f, file_header.entries[0].offset + measurement_header.len, SEEK_SET);
-		safe_fread(&test, 50, f);
-		debug(test, 50);
+		//safe_fread(&test, 50, f);
+		//debug(test, 50);
 
 	}
 
