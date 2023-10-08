@@ -10,12 +10,7 @@
 #include "filetools.c"
 #include "strtools.c"
 
-typedef struct MeasurementHeader {
-	uint32_t len;
-	uint32_t num;
-} MeasurementHeader;
-
-typedef struct ScanHeader {
+typedef struct ScanHeader { // Could be reference, actual scan, etc
 	uint32_t id;
 	uint32_t fileid;
 	uint64_t offset;
@@ -24,19 +19,99 @@ typedef struct ScanHeader {
 	char protocol_name[64];
 } ScanHeader;
 
-typedef struct FileHeader {
-	uint32_t whatever; // Nice
+typedef struct FileHeader { // first thing to read in
+	uint32_t version;
 	uint32_t num;
 	ScanHeader entries[64];
 } FileHeader;
 
-typedef struct data_header {
-	uint32_t	flags_and_dma_len;
+typedef struct ProtocolHeader { // Tells how many protocol blocks there are
+	uint32_t len;
+	uint32_t num;
+} ProtocolHeader;
+
+/*
+	It is further quite striking that it is quite specific for Cartesian imaging.
+	I assume this has historic reasons, and now it is what it is, fair enough.
+	However, it is outrageous that the description of scans is so strongly entangled with
+	a standard format for raw data. To give a couple of examples, there are flags related to heart beats,
+	BLADE sampling, or partial Fourier.
+	Since it is difficult to define a fixed standard format that includes all relevant information
+	for current and future types of scans, the separation of raw-data and information about the
+	applied technique follows logically.
+*/
+#define EVALINFOMASK_ACQEND			1 << 0  // Last readout in scan
+#define EVALINFOMASK_RTFEEDBACK			1 << 1  // Realtime feedback
+#define EVALINFOMASK_HPFEEDBACK			1 << 2  // High perfomance feedback
+#define EVALINFOMASK_ONLINE			1 << 3  // Online processing for recon?
+#define EVALINFOMASK_OFFLINE			1 << 4  // Offline processing (question: doesn't !offline -> online?)
+#define EVALINFOMASK_SYNCDATA			1 << 5  // Readout contains synchroneous data (synchroneous?)
+#define EVALINFOMASK_UNNAMED6			1 << 6
+#define EVALINFOMASK_UNNAMED7			1 << 7
+#define EVALINFOMASK_LASTSCANINCONCAT		1 << 8  // Last scan in concatenation (I love the seqloop)
+#define EVALINFOMASK_UNNAMED9			1 << 9
+#define EVALINFOMASK_RAWDATACORRECTION		1 << 10 // Use raw data correction factor
+#define EVALINFOMASK_LASTSCANINMEAS		1 << 11 // Last scan in measurement (nice ordering of flags, well done)
+#define EVALINFOMASK_SCANSCALEFACTOR		1 << 12 // Use scan specific additional scale (I guess similar to raw data correction factor)
+#define EVALINFOMASK_SECONDHADAMARPULSE		1 << 13 // Second RF exitation of Hadamar pulse
+#define EVALINFOMASK_REFPHASESTABSCAN		1 << 14 // Reference phase stabilization scan
+#define EVALINFOMASK_PHASESTABSCAN		1 << 15 // Phase stabilization scan
+#define EVALINFOMASK_D3FFT			1 << 16 // Execute 3D FFT
+#define EVALINFOMASK_SIGNREV			1 << 17 // Sign reversal
+#define EVALINFOMASK_PHASEFFT			1 << 18 // Execute phase fft
+#define EVALINFOMASK_SWAPPED			1 << 19 // Swapped phase and readout direction
+#define EVALINFOMASK_POSTSHAREDLINE		1 << 20 // Shared line
+#define EVALINFOMASK_PHASCOR			1 << 21 // Phase correction data
+#define EVALINFOMASK_PATREFSCAN			1 << 22 // Additional scan for partial Fourier reference line/partition
+#define EVALINFOMASK_PATREFANDIMASCAN		1 << 23 // Partial Fourier reference that is also used as image scan
+#define EVALINFOMASK_REFLECT			1 << 24 // Reflect line (along readout or what?)
+#define EVALINFOMASK_NOISEADJSCAN		1 << 25 // Noise adjust scan
+#define EVALINFOMASK_SHARENOW			1 << 26 // Lines (readouts?) may be shared between e.g. phases
+#define EVALINFOMASK_LASTMEASUREDLINE		1 << 27 // Last phase (lines) which is measured, I guess
+#define EVALINFOMASK_FIRSTSCANINSLICE		1 << 28 // First scan in slice
+#define EVALINFOMASK_LASTSCANINSLICE		1 << 29 // Last scan in slice
+#define EVALINFOMASK_TREFFECTIVEBEGIN		1 << 30 // Effective TR begin (triggered from realtime feedback?)
+#define EVALINFOMASK_TREFFECTIVEEND		1 << 31 // Effective TR end (also triggered)
+#define EVALINFOMASK_REF_POSITION		1 << 32 // Reference position for (patient?) movement
+#define EVALINFOMASK_SLC_AVERAGED		1 << 33 // Averaged slice
+#define EVALINFOMASK_TAGFLAG1			1 << 34 // Adjust scans
+#define EVALINFOMASK_CT_NORMALIZE		1 << 35 // Correction scan for TimCT prescan normalise
+#define EVALINFOMASK_SCAN_FIRST			1 << 36 // First scan of a particular map
+#define EVALINFOMASK_SCAN_LAST			1 << 37 // Last scan of a particular map
+#define EVALINFOMASK_SLICE_ACCEL_REFSCAN        1 << 38 // Single-band reference scan for multi-band
+#define EVALINFOMASK_SLICE_ACCEL_PHASCOR	1 << 39 // Additional phase correction in multi-band
+#define EVALINFOMASK_FIRST_SCAN_IN_BLADE	1 << 40 // The first line of a blade
+#define EVALINFOMASK_LAST_SCAN_IN_BLADE		1 << 41 // The last line of a blade
+#define EVALINFOMASK_LAST_BLADE_IN_TR		1 << 42 // Is true for all lines of last BLADE in each TR
+#define EVALINFOMASK_UNNAMED43			1 << 43
+#define EVALINFOMASK_PACE			1 << 44 // PACE scan
+#define EVALINFOMASK_RETRO_LASTPHASE		1 << 45 // Last phase in a heartbeat
+#define EVALINFOMASK_RETRO_ENDOFMEAS		1 << 46 // Readout is at end of measurement
+#define EVALINFOMASK_RETRO_REPEATTHISHEARTBEAT	1 << 47 // Repeat the current heartbeat
+#define EVALINFOMASK_RETRO_REPEATPREVHEARTBEAT	1 << 48 // Repeat the previous heartbeat
+#define EVALINFOMASK_RETRO_ABORTSCANNOW		1 << 49 // Abort everything
+#define EVALINFOMASK_RETRO_LASTHEARTBEAT	1 << 50 // Readout is from last heartbeat (a dummy)
+#define EVALINFOMASK_RETRO_DUMMYSCAN		1 << 51 // Readout is just a dummy scan, throw it away
+#define EVALINFOMASK_RETRO_ARRDETDISABLED	1 << 52 // Disable all arrhythmia detection
+#define EVALINFOMASK_B1_CONTROLLOOP		1 << 53 // Use readout for B1 Control Loop
+#define EVALINFOMASK_SKIP_ONLINE_PHASCOR	1 << 54 // Do not correct phases online
+#define EVALINFOMASK_SKIP_REGRIDDING		1 << 55 // Do not regrid
+#define EVALINFOMASK_MDH_VOP			1 << 56 // VOP based RF monitoring
+#define EVALINFOMASK_UNNAMED57			1 << 57
+#define EVALINFOMASK_UNNAMED58			1 << 58
+#define EVALINFOMASK_UNNAMED59			1 << 59
+#define EVALINFOMASK_UNNAMED60			1 << 60
+#define EVALINFOMASK_WIP_1			1 << 61 // WIP application type 1
+#define EVALINFOMASK_WIP_2			1 << 62 // WIP application type 2
+#define EVALINFOMASK_WIP_3			1 << 63 // WIP application type 3
+
+typedef struct ReadoutHeader {
+	uint32_t	dma_length_and_flags; // What is dma? First 25 bits are length, last 7 are flags. Conversion via dma_length_and_flags % (1 << 25) I think
 	int32_t		meas_uid;
 	uint32_t	scan_counter;
 	uint32_t	time_stamp;
 	uint32_t	pmu_timestamp;
-	uint16_t	systemtype;
+	uint16_t	system_type;
 	uint16_t	patient_table_pos_delay;
 	int32_t		patient_table_pos_x;
 	int32_t		patient_table_pos_y;
@@ -44,22 +119,161 @@ typedef struct data_header {
 	int32_t		reserved;
 	uint64_t	eval_info_mask;
 	uint16_t	num_samples;
-	uint16_t	num_channels; // ?
-	//LineCounter	counter;
-	//CutOff		cut_off;
+	uint16_t	num_channels;
+        uint16_t	line;
+        uint16_t	average;
+        uint16_t	slice;
+        uint16_t	partition;
+        uint16_t	echo;
+        uint16_t	phase;
+        uint16_t	repetition;
+        uint16_t	set;
+        uint16_t	segment;
+        uint16_t	a;
+        uint16_t	b;
+        uint16_t	c;
+        uint16_t	d;
+        uint16_t	e;
+        uint16_t	cutoff[2];
 	uint16_t	center_col;
 	uint16_t	coil_select;
 	float		readout_offcentre;
 	uint32_t	time_since_last_rf;
 	uint16_t	center_line;
 	uint16_t	center_partition;
-	//SliceData	slice_data;
+        float		position[3]; // Patient coordinates, i.e. [sag, cor, tra]
+        float		quaternion[4]; // I guess normal and in-plane rotation
 	uint16_t	ice[24];
 	uint16_t	also_reserved[4];
 	uint16_t	application_counter;
 	uint16_t	application_mask;
 	uint32_t	crc;
-} data_header;
+} ReadoutHeader;
+
+typedef struct ChannelHeader {
+	uint32_t	type_and_length;
+	int32_t		meas_uid;
+	uint32_t	scan_counter;
+	int32_t		reserved;
+	uint32_t	sequence_time;
+	uint32_t	unused;
+	uint16_t	id;
+	uint16_t	also_unused;
+	uint32_t	crc;
+} ChannelHeader;
+
+struct ScanData;
+typedef struct ScanData {
+	struct ScanData* next;
+	struct ScanData* prev;
+	ReadoutHeader *readout_hdr;
+} ScanData;
+
+size_t get_readout_num_bytes(ReadoutHeader *readout_hdr) {
+	return readout_hdr->dma_length_and_flags % (1 << 25);
+}
+
+
+
+void print_readout_header(ReadoutHeader *hdr)
+{
+	printf(
+		"dma_length_and_flags       %u\n"
+		"meas_uid                   %d\n"
+		"scan_counter               %u\n"
+		"time_stamp                 %u\n"
+		"pmu_timestamp              %u\n"
+		"system_type                %hu\n"
+		"patient_table_pos_delay    %hu\n"
+		"patient_table_pos_x        %d\n"
+		"patient_table_pos_y        %d\n"
+		"patient_table_pos_z        %d\n"
+		"reserved                   %d\n"
+		"eval_info_mask             %lu\n"
+		"num_samples                %hu\n"
+		"num_channels               %hu\n"
+		"line                       %hu\n"
+		"average                    %hu\n"
+		"slice                      %hu\n"
+		"partition                  %hu\n"
+		"echo                       %hu\n"
+		"phase                      %hu\n"
+		"repetition                 %hu\n"
+		"set                        %hu\n"
+		"segment                    %hu\n"
+		"a                          %hu\n"
+		"b                          %hu\n"
+		"c                          %hu\n"
+		"d                          %hu\n"
+		"e                          %hu\n"
+		"cutoff[2]                 [%hu, %hu]\n"
+		"center_col                 %hu\n"
+		"coil_select                %hu\n"
+		"readout_offcentre          %f\n"
+		"time_since_last_rf         %u\n"
+		"center_line                %hu\n"
+		"center_partition           %hu\n"
+		"position[3]               [%6f, %6f, %6f]\n"
+		"quaternion[4]             [%6f, %6f, %6f, %6f]\n"
+		"ice[24]                   [%12hu, %12hu, %12hu, %12hu,\n"
+		"                           %12hu, %12hu, %12hu, %12hu,\n"
+		"                           %12hu, %12hu, %12hu, %12hu,\n"
+		"                           %12hu, %12hu, %12hu, %12hu,\n"
+		"                           %12hu, %12hu, %12hu, %12hu,\n"
+		"                           %12hu, %12hu, %12hu, %12hu]\n"
+		"also_reserved[4]          [%hu, %hu, %hu, %hu]\n"
+		"application_counter        %hu\n"
+		"application_mask           %hu\n"
+		"crc                        %u\n",
+		hdr->dma_length_and_flags,
+		hdr->meas_uid,
+		hdr->scan_counter,
+		hdr->time_stamp,
+		hdr->pmu_timestamp,
+		hdr->system_type,
+		hdr->patient_table_pos_delay,
+		hdr->patient_table_pos_x,
+		hdr->patient_table_pos_y,
+		hdr->patient_table_pos_z,
+		hdr->reserved,
+		hdr->eval_info_mask,
+		hdr->num_samples,
+		hdr->num_channels,
+		hdr->line,
+		hdr->average,
+		hdr->slice,
+		hdr->partition,
+		hdr->echo,
+		hdr->phase,
+		hdr->repetition,
+		hdr->set,
+		hdr->segment,
+		hdr->a,
+		hdr->b,
+		hdr->c,
+		hdr->d,
+		hdr->e,
+		hdr->cutoff[0], hdr->cutoff[1],
+		hdr->center_col,
+		hdr->coil_select,
+		hdr->readout_offcentre,
+		hdr->time_since_last_rf,
+		hdr->center_line,
+		hdr->center_partition,
+		hdr->position[0], hdr->position[1], hdr->position[2],
+		hdr->quaternion[0], hdr->quaternion[1], hdr->quaternion[2], hdr->quaternion[3],
+		hdr->ice[0],  hdr->ice[1],  hdr->ice[2],  hdr->ice[3],
+		hdr->ice[4],  hdr->ice[5],  hdr->ice[6],  hdr->ice[7],
+		hdr->ice[8],  hdr->ice[9],  hdr->ice[10], hdr->ice[11],
+		hdr->ice[12], hdr->ice[13], hdr->ice[14], hdr->ice[15],
+		hdr->ice[16], hdr->ice[17], hdr->ice[18], hdr->ice[19],
+		hdr->ice[20], hdr->ice[21], hdr->ice[22], hdr->ice[23],
+		hdr->also_reserved[0], hdr->also_reserved[1], hdr->also_reserved[2], hdr->also_reserved[3],
+		hdr->application_counter,
+		hdr->application_mask,
+		hdr->crc
+	);
+}
 
 
 #define PARAMETER_NAME_LEN 64
@@ -81,19 +295,17 @@ typedef struct ParameterList {
 void read_protocol(FILE* f, char *name, char** start, char** stop) {
 	// Read config
 	// TODO: what is it useful for?
-	{
-		for (int j = 0; j < 48; j++) {
-			char c = fgetc(f);
-			check_file(f);
-			name[j] = c;
-			if (c == '\0') break;
-		}
+	for (int j = 0; j < 48; j++) {
+		char c = fgetc(f);
+		check_file(f);
+		name[j] = c;
+		if (c == '\0') break;
 	}
 
 	// Read protocol into string
 	char *str;
-	unsigned int len;
-	safe_fread(&len, sizeof(unsigned int), f);
+	uint32_t len;
+	safe_fread(&len, sizeof(uint32_t), f);
 	str = malloc(len);
 	safe_fread(str, len, f);
 
@@ -167,7 +379,7 @@ void print_parameter(Parameter *p) {
 	}
 	printf("%s %s", p->type, p->name);
 	if (strcmp(p->type, "ParamDouble") == 0) printf(" = %lf", get_double_parameter(p));
-	else if (strcmp(p->type, "ParamLong") == 0) printf(" = %li", get_double_parameter(p));
+	else if (strcmp(p->type, "ParamLong") == 0) printf(" = %li", get_long_parameter(p));
 	else if (strcmp(p->type, "ParamBool") == 0) printf(" = %c", get_bool_parameter(p));
 	else if (strcmp(p->type, "ParamString") == 0) printf(" = %s", get_string_parameter(p));
 	printf("\n");
@@ -305,7 +517,7 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 
 	// Append all entries to list
 	while (start < stop) {
-		// Parse parameter name and type in case of map, or copy type for array 
+		// Parse parameter name and type in case of map, or copy type for array
 		if (mode & parse_type) { // Name and type are to be determined (map, or array type determination)
 			// Find start of parameter signature
 			bool not_found = true;
@@ -334,10 +546,9 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 					continue;
 				}
 				else if (strncmp(start+1, "Visible", 7) == 0) {
-					printf("asd\n");
+					// TODO: is the necessary?
 					start = find('\n', start, stop) + 1;
-					debug(start, 20);
-					printf("basd\n");
+					//debug(start, 20);
 					continue;
 				}
 				start += 1;
@@ -422,7 +633,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		stop -= 1;
 	}
 
-	printf("%s %s\n", p->name, p->type);
+	//printf("%s %s\n", p->name, p->type);
 	if (strcmp(p->type, "ParamMap") == 0 || strcmp(p->type, "Pipe") == 0) {
 		parse_parameter_list(p, start, stop, mode);
 		//printf("%s %s\n", p->name, p->type);
@@ -471,7 +682,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			// Reference this parameter in contents of p
 			p->content = (void *) p_array;
 
-			// Parse array type and put into the ParamMap list 
+			// Parse array type and put into the ParamMap list
 			Parameter* p_array_element = &(list->p);
 			start = parse_parameter_name_type(p_array_element, start, type_closing_brace);
 			parse_parameter_content(p_array_element, start, type_closing_brace, parse_type);
@@ -523,7 +734,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 				start = closing_quote + 1;
 			}
 		}
-		
+
 		// TODO: can a functor be in a ParamArray?
 		if (mode & parse_content) parse_parameter_list((Parameter *) p->content, start, stop, mode);
 		//printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
@@ -592,10 +803,8 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 
 
 
-int main(int argc, char* argv[]) {
-	
-	printf("%d\n", sizeof(data_header));
-	return 0;
+int main(int argc, char* argv[])
+{
 	// Open file
 	FILE *f;
 	if (argc < 2) {
@@ -604,20 +813,16 @@ int main(int argc, char* argv[]) {
 	}
 	f = fopen(argv[1], "rb");
 
-	// Check version
-	{
-		uint32_t v[2];
-		safe_fread(&v, sizeof(v), f);
-		if (v[0] >= 10000 || v[1] > 64) {
-			printf("Error: old unsupported twix version\n");
-			return 1;
-		}
-	}
-	fseek(f, 0, SEEK_SET);
-
 	// Get file header
 	FileHeader file_header;
 	safe_fread(&file_header, sizeof(file_header), f);
+	// Check version
+	if (file_header.version >= 10000 || file_header.num > 64) {
+		printf("Error: unsupported twix version\n");
+		return 1;
+	}
+
+	// TODO put in function
 	//printf("File header: 1 whatever %d\n 2 num %d\n 3 id %d\n 4 fileid %d\n 5 offset %d\n 6 len %d\n name %s\n prot %s\n",
 	//	file_header.whatever,
 	//	file_header.num,
@@ -630,16 +835,16 @@ int main(int argc, char* argv[]) {
 	//);
 
 	// Iterate measurements
+	// TODO: here create arrays holding the protocols and data of every scan
 	for (int scan = 0; scan < file_header.num; scan++) {
 		// Read measurement header
-		uint64_t position = file_header.entries[scan].offset;
-		fseek(f, position, SEEK_SET);
-		MeasurementHeader measurement_header;
-		safe_fread(&measurement_header, sizeof(MeasurementHeader), f);
-		
+		fseek(f, file_header.entries[scan].offset, SEEK_SET);
+		ProtocolHeader protocol_header;
+		safe_fread(&protocol_header, sizeof(ProtocolHeader), f);
+
 		// Parse headers
-		Parameter *headers = (Parameter*) calloc(measurement_header.num, sizeof(Parameter));
-		for (int header = 0; header < measurement_header.num; header++) {
+		Parameter *headers = (Parameter*) calloc(protocol_header.num, sizeof(Parameter));
+		for (int header = 0; header < protocol_header.num; header++) {
 			// Read protocol into string
 			Parameter *p = &(headers[header]);
 			char *start, *stop;
@@ -664,13 +869,65 @@ int main(int argc, char* argv[]) {
 			parse_parameter_content(p, start, stop, parse_type | parse_content);
 		}
 
-		// Read measurement data
-		fseek(f, file_header.entries[0].offset + measurement_header.len, SEEK_SET);
-		//safe_fread(&test, 50, f);
-		//debug(test, 50);
+		// Read in scan data
+		size_t file_pos = file_header.entries[scan].offset + protocol_header.len; // TODO: might not need var
+		size_t num_bytes = file_header.entries[scan].len - protocol_header.len;
+		//char *asd = malloc(14);
+		//safe_fread(asd, 14, f);
+		//debug(asd, 14);
+		//printf("File pos %ld %ld %ld %ld\n", ftell(f), file_pos, num_bytes, file_header.entries[scan].offset);
+		//return 0;
+		char *scan_buffer = (char *)malloc(num_bytes);
+		fseek(f, file_pos, SEEK_SET);
+		safe_fread(scan_buffer, num_bytes, f);
+		// Parse scan data
+		ScanData scan_data;
+		scan_data.prev = NULL;
+		ScanData *ptr_scan_data = &scan_data;
+		char *pos = scan_buffer;
+		if (num_bytes < sizeof(ReadoutHeader)) {
+			printf("Error: scan %d has too few bytes (%ld < %ld)\n", scan, num_bytes, sizeof(ReadoutHeader));
+			return 1;
+		}
+		while (true) {
+			ReadoutHeader *readout_hdr = (ReadoutHeader *)pos;
+			//print_readout_header(readout_hdr);
+			ptr_scan_data->readout_hdr = readout_hdr;
+			pos += get_readout_num_bytes(readout_hdr);
+			if (pos >= scan_buffer + num_bytes) break;
+			ptr_scan_data->next = (ScanData *)malloc(sizeof(ScanData));
+			ptr_scan_data->next->prev = ptr_scan_data;
+			ptr_scan_data = ptr_scan_data->next;
+		}
+		// ptr_scan_data->channel_hdr = (ChannelHeader *)malloc(readout_hdr->num_channels * sizeof(ChannelHeader*));
+		// readout_hdr.num_channels, sizeof(ChannelHeader), sizeof(complex float) * readout_hdr.num_samples
+		
+	    // Apparently there is another readout registered at the end, no idea what syncdata is (in between meas?)
+            //if self.is_flag_set('ACQEND') or self.is_flag_set('SYNCDATA'):
+            //    return
+
+		//while pos + 128 < scanEnd:  # fail-safe not to miss ACQEND
+		//    fid.seek(pos, os.SEEK_SET)
+		//    try:
+		//	mdb = twixtools.mdb.Mdb(fid, version_is_ve)
+
+		//    if not keep_syncdata_and_acqend:
+		//	if mdb.is_flag_set('SYNCDATA'):
+		//	    continue
+		//	elif mdb.is_flag_set('ACQEND'):
+		//	    break
+
+		//    out[-1]['mdb'].append(mdb)
+
+		//    if mdb.is_flag_set('ACQEND'):
+		//	break
 
 	}
 
+
+	// TODO: free protocol
+
+	// Note: eof is not reached yet, residual bytes are just zeros I think, why?
 
 	return 0;
 }

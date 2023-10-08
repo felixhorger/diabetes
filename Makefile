@@ -1,5 +1,4 @@
 
-diabetes: src/*.c
-	gcc -g src/twixeater.c -o twixeater
+twixeater: src/*.c
+	gcc -Wall -g src/twixeater.c -o twixeater
 
-	
