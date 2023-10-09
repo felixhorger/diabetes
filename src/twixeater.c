@@ -162,11 +162,11 @@ typedef struct ChannelHeader {
 	uint32_t	crc;
 } ChannelHeader;
 
-struct ScanData;
+#define SCANDATABLOCKLEN 128
 typedef struct ScanData {
-	struct ScanData* next;
-	struct ScanData* prev;
-	ReadoutHeader *readout_hdr;
+	ReadoutHeader ***hdrs;
+	int32_t block;
+	int32_t index;
 } ScanData;
 
 size_t get_readout_num_bytes(ReadoutHeader *readout_hdr) {
@@ -882,23 +882,33 @@ int main(int argc, char* argv[])
 		safe_fread(scan_buffer, num_bytes, f);
 		// Parse scan data
 		ScanData scan_data;
-		scan_data.prev = NULL;
-		ScanData *ptr_scan_data = &scan_data;
+		scan_data.block = -1;
+		scan_data.index = SCANDATABLOCKLEN;
 		char *pos = scan_buffer;
 		if (num_bytes < sizeof(ReadoutHeader)) {
 			printf("Error: scan %d has too few bytes (%ld < %ld)\n", scan, num_bytes, sizeof(ReadoutHeader));
 			return 1;
 		}
-		while (true) {
+		while (pos < scan_buffer + num_bytes) {
+			if (scan_data.index == SCANDATABLOCKLEN) {
+				scan_data.index = 0;
+				scan_data.block += 1;
+				scan_data.hdrs = (ReadoutHeader ***)reallocarray(
+					scan_data.hdrs,
+					scan_data.block+1,
+					sizeof(ReadoutHeader**)
+				);
+				scan_data.hdrs[scan_data.block] = (ReadoutHeader **)malloc(
+					sizeof(ReadoutHeader*) * SCANDATABLOCKLEN
+				);
+			}
 			ReadoutHeader *readout_hdr = (ReadoutHeader *)pos;
 			//print_readout_header(readout_hdr);
-			ptr_scan_data->readout_hdr = readout_hdr;
+			scan_data.hdrs[scan_data.block][scan_data.index] = readout_hdr;
+			scan_data.index += 1;
 			pos += get_readout_num_bytes(readout_hdr);
-			if (pos >= scan_buffer + num_bytes) break;
-			ptr_scan_data->next = (ScanData *)malloc(sizeof(ScanData));
-			ptr_scan_data->next->prev = ptr_scan_data;
-			ptr_scan_data = ptr_scan_data->next;
 		}
+		printf("%d %d\n", scan_data.block, scan_data.index);
 		// ptr_scan_data->channel_hdr = (ChannelHeader *)malloc(readout_hdr->num_channels * sizeof(ChannelHeader*));
 		// readout_hdr.num_channels, sizeof(ChannelHeader), sizeof(complex float) * readout_hdr.num_samples
 		
@@ -924,8 +934,11 @@ int main(int argc, char* argv[])
 
 	}
 
+	// TODO: Functionality to get scan data and sampling indices.
 
-	// TODO: free protocol
+	// TODO: better functions for protocols
+
+	// TODO: functionality to free protocol and other memory 
 
 	// Note: eof is not reached yet, residual bytes are just zeros I think, why?
 
