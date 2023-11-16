@@ -10,7 +10,7 @@
 #include "protocols.c"
 #include "data.c"
 
-
+// TODO: make function to get protocol in string form from it
 
 int main(int argc, char* argv[])
 {
@@ -20,6 +20,7 @@ int main(int argc, char* argv[])
 		exit(1);
 	}
 	f = fopen(argv[1], "rb");
+	// TODO: setvbuf
 
 	FileHeader file_header;
 	safe_fread(f, &file_header, sizeof(file_header));
@@ -28,89 +29,41 @@ int main(int argc, char* argv[])
 	//print_file_header(file_header);
 
 
-	// TODO: here create arrays holding the protocols and data of every scan for the user to have
+
+	Protocol *protocols = (Protocol *) malloc(sizeof(Protocol) * file_header.num_scans);
+	ScanData *data = (ScanData *) malloc(sizeof(ScanData) * file_header.num_scans);
 	for (int scan = 0; scan < file_header.num_scans; scan++) {
 
-		protocols = parse_protocols();
-
-		---
-		ProtocolHeader protocol_header;
+		// Protocols
 		fseek(f, file_header.entries[scan].offset, SEEK_SET);
-		safe_fread(f, &protocol_header, sizeof(ProtocolHeader));
+		protocols[scan] = read_protocol(f);
+		//parse_protocol(protocols[scan]);
 
-		Parameter *protocols = (Parameter*) calloc(protocol_header.num_protocols, sizeof(Parameter));
-		for (int p = 0; p < protocol_header.num_protocols; p++) {
-			// Read protocol into string
-			char *start, *stop;
-			char *name = (char*) &(protocols[p].name);
-			read_protocol(f, name, &start, &stop);
-			// Parse protocol
-			if (strcmp(name, "Meas") == 0) {
-				start = find('{', start+1, stop);
-				start = find_matching(start, '}');
-				start = find('<', start, stop);
-			}
-			else if (strcmp(name, "MeasYaps") == 0) {
-				// TODO
-				continue;
-			}
-			else if (strcmp(name, "Phoenix") == 0) {
-				// TODO: worth it?
-				continue;
-			}
-			strcpy(protocols[p].type, "ParamMap");
-			parse_parameter_content(&(protocols[p]), start, stop, parse_type | parse_content);
-		}
-		---
+		// Scan data
+		/* TODO:
+			this is bad because it is like the old mapVBVD, going through the whole memory
+			just to get the pointers to the readout headers.
 
+			Better approach for top level usage (all functions must set their position in file, how?):
+			twix = twix_open(name); // Just opens the file and reads the header, nothing else
+			// twix is a struct holding the file pointer, file_header and *protocols and *data from above
+			twix_parse_protocol(twix); // reads the protocol and parses it, because why would you read it without using it? For users that want more control, there are still the low-level functions, how about exporting them? Would need to add twix_ to everyone of them. Also think about which data types need to be exported.
+			twix_get_size(twix); // applied to the main twix struct
+			twix_get_TE(twix);
+			kspace = twix_get_kspace(twix); // reads in all the data, in which form? Check for the special ones not containing data.
+			kspace = twix_filter_kspace(twix, filter_func()); // could also filter, filter_func can return 0 for ok, 1 for no, 2 for stop reading. What happens with the pointer structure then, being finished "half way"?
+			twix_close(twix); // Frees memory and closes the file, internally can have function twix_free_data, twix_free_protocol etc which the user can also have available
 
-		// DATA ----------------------------
-
-		// Read in scan data
-		size_t file_pos = file_header.entries[scan].offset + protocol_header.length; // TODO: might not need var
-		size_t num_bytes = file_header.entries[scan].len - protocol_header.length;
-		//char *asd = malloc(14);
-		//safe_fread(f, asd, 14);
-		//debug(asd, 14);
-		//printf("File pos %ld %ld %ld %ld\n", ftell(f), file_pos, num_bytes, file_header.entries[scan].offset);
-		//return 0;
-		char *scan_buffer = (char *)malloc(num_bytes);
+			Better would be not to do this here, 
+		*/
+		size_t file_pos = file_header.entries[scan].offset + protocols[scan].length;
 		fseek(f, file_pos, SEEK_SET);
-		safe_fread(f, scan_buffer, num_bytes);
-		// Parse scan data
-		ScanData scan_data;
-		scan_data.block = -1;
-		scan_data.index = SCANDATABLOCKLEN;
-		char *pos = scan_buffer;
-		if (num_bytes < sizeof(ReadoutHeader)) {
-			printf("Error: scan %d has too few bytes (%ld < %ld)\n", scan, num_bytes, sizeof(ReadoutHeader));
-			return 1;
+		size_t num_bytes = file_header.entries[scan].len - protocols[scan].length;
+		data[scan] = read_data(f, num_bytes);
+		if (data[scan].hdrs == NULL) {
+			printf("Error: skipping scan %d, too few bytes (%ld < %ld)\n", scan, num_bytes, sizeof(ReadoutHeader));
 		}
-		while (pos < scan_buffer + num_bytes) {
-			if (scan_data.index == SCANDATABLOCKLEN) {
-				scan_data.index = 0;
-				scan_data.block += 1;
-				scan_data.hdrs = (ReadoutHeader ***)reallocarray(
-					scan_data.hdrs,
-					scan_data.block+1,
-					sizeof(ReadoutHeader**)
-				);
-				scan_data.hdrs[scan_data.block] = (ReadoutHeader **)malloc(
-					sizeof(ReadoutHeader*) * SCANDATABLOCKLEN
-				);
-			}
-			ReadoutHeader *readout_hdr = (ReadoutHeader *)pos;
-			//print_readout_header(readout_hdr);
-			scan_data.hdrs[scan_data.block][scan_data.index] = readout_hdr;
-			scan_data.index += 1;
-			pos += get_readout_num_bytes(readout_hdr);
-		}
-		scan_data.hdrs[scan_data.block] = (ReadoutHeader **)reallocarray(
-			scan_data.hdrs[scan_data.block],
-			scan_data.index,
-			sizeof(ReadoutHeader*)
-		);
-		printf("%d %d\n", scan_data.block, scan_data.index);
+
 		// ptr_scan_data->channel_hdr = (ChannelHeader *)malloc(readout_hdr->num_channels * sizeof(ChannelHeader*));
 		// readout_hdr.num_channels, sizeof(ChannelHeader), sizeof(complex float) * readout_hdr.num_samples
 		

@@ -29,7 +29,6 @@ void safe_fread(FILE* f, void* ptr, size_t n)
 {
 	size_t m = fread(ptr, 1, n, f);
 	if (m == n) return;
-
 	check_file(f);
 	return;
 }

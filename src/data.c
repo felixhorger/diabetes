@@ -52,7 +52,7 @@ struct ReadoutHeader
 	uint16_t	center_line;
 	uint16_t	center_partition;
         float		position[3]; // Patient coordinates, i.e. [sag, cor, tra]
-        float		quaternion[4]; // I guess normal and in-plane rotation
+        float		quaternion[4]; // I guess normal and in-plane rotation, but not true
 	uint16_t	ice[24];
 	uint16_t	also_reserved[4];
 	uint16_t	application_counter;
@@ -180,5 +180,72 @@ void print_readout_header(ReadoutHeader *hdr)
 		hdr->application_mask,
 		hdr->crc
 	);
+}
+
+
+void free_scan_data(ScanData scan_data)
+{
+	for (int b = 0; b < scan_data.block; b++) free(scan_data.hdrs[b]);
+	free(scan_data.hdrs);
+	return;
+}
+
+
+// TODO: how to use num_bytes to only read a certain number of readouts? How is e.g. a measurement/average indicated?
+ScanData read_data(FILE *f, size_t num_bytes)
+{
+	// Read in scan data
+	char *scan_buffer = (char *)malloc(num_bytes);
+	safe_fread(f, scan_buffer, num_bytes); // TODO: this can be problematic, since it reads all into memory, use case for when this is bad?
+	// Parse scan data
+	ScanData scan_data;
+	scan_data.block = -1;
+	scan_data.index = SCANDATABLOCKLEN;
+	scan_data.hdrs = NULL;
+	char *pos = scan_buffer;
+	if (num_bytes < sizeof(ReadoutHeader)) {
+		free(scan_buffer);
+		return scan_data;
+	}
+	while (pos < scan_buffer + num_bytes) {
+		if (scan_data.index == SCANDATABLOCKLEN) {
+			scan_data.index = 0;
+			scan_data.block += 1;
+			// TODO: I want to say something nice about IT and how difficult it can be to keep stuff up to date
+			//scan_data.hdrs = (ReadoutHeader ***)reallocarray(
+			//	scan_data.hdrs,
+			//	scan_data.block+1,
+			//	sizeof(ReadoutHeader**)
+			//);
+			scan_data.hdrs = (ReadoutHeader ***)realloc(
+				scan_data.hdrs,
+				(scan_data.block+1) * sizeof(ReadoutHeader**)
+			);
+			scan_data.hdrs[scan_data.block] = (ReadoutHeader **)malloc(
+				sizeof(ReadoutHeader*) * SCANDATABLOCKLEN
+			);
+		}
+		ReadoutHeader *readout_hdr = (ReadoutHeader *)pos;
+		//print_readout_header(readout_hdr);
+		scan_data.hdrs[scan_data.block][scan_data.index] = readout_hdr;
+		scan_data.index += 1;
+		pos += get_readout_num_bytes(readout_hdr);
+	}
+	if (pos != scan_buffer + num_bytes) {
+		free_scan_data(scan_data);
+		free(scan_buffer);
+		return scan_data;
+	}
+	// TODO: see comment above
+	//scan_data.hdrs[scan_data.block] = (ReadoutHeader **)reallocarray(
+	//	scan_data.hdrs[scan_data.block],
+	//	scan_data.index,
+	//	sizeof(ReadoutHeader*)
+	//);
+	scan_data.hdrs[scan_data.block] = (ReadoutHeader **)realloc(
+		scan_data.hdrs[scan_data.block],
+		scan_data.index * sizeof(ReadoutHeader*)
+	);
+	return scan_data;
 }
 

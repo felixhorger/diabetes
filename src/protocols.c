@@ -2,15 +2,17 @@
 #define min(a, b) (a) < (b) ? (a) : (b)
 #define PARAMETER_NAME_LEN 64
 #define PARAMETER_TYPE_LEN 16
+#define DEBUG_PARAMETERS
 
-typedef struct ProtocolHeader ProtocolHeader;
+typedef struct Protocol Protocol;
 typedef struct Parameter Parameter;
 typedef struct ParameterList ParameterList;
 
-struct ProtocolHeader
+struct Protocol
 {
 	uint32_t length; // number of bytes of protocols (incl. header)
-	uint32_t num_protocols;
+	uint32_t num; // how many parameter sets
+	Parameter *parameters;
 };
 
 struct Parameter
@@ -79,60 +81,6 @@ void print_parameter(Parameter *p)
 	else if (is_parameter_type(p, "ParamBool"))   printf(" = %c",  get_bool_parameter(p));
 	else if (is_parameter_type(p, "ParamString")) printf(" = %s",  get_string_parameter(p));
 	printf("\n");
-	return;
-}
-
-
-void read_protocol(FILE* f, char *name, char** start, char** stop)
-{
-	// Read config
-	// TODO: what is it useful for?
-	for (int j = 0; j < 48; j++) {
-		char c = fgetc(f);
-		check_file(f);
-		name[j] = c;
-		if (c == '\0') break;
-	}
-
-	// Read protocol into string
-	char *str;
-	uint32_t len;
-	safe_fread(f, &len, sizeof(uint32_t));
-	str = malloc(len);
-	safe_fread(f, str, len);
-
-	if (strcmp(name, "MeasYaps") == 0) {
-		// Check initial signature
-		char signature[] = "### ASCCONV BEGIN ";
-		size_t signature_length = sizeof(signature)-1;
-		if (strncmp(str, signature, signature_length) != 0) {
-			printf("Error: parameter string doesn't start as expected:\n");
-			debug(str, signature_length);
-			printf("\n");
-			exit(1);
-		}
-		*start = strstr(str + signature_length, " ###") + 4;
-		*stop = *start + len - sizeof("### ASCCONV END ###") - 132; // Mysterious offset :(
-	}
-	else {
-		// Check initial signature
-		char signature[] = "<XProtocol>";
-		size_t signature_length = sizeof(signature)-1;
-		if (strncmp(str, signature, signature_length) != 0) {
-			printf("Error: parameter string doesn't start as expected:\n");
-			debug(str, signature_length);
-			printf("\n");
-			exit(1);
-		}
-
-		// Set new start and stop pointers of string
-		*start = find('{', str, str+len-1);
-		*stop = find('}', str+len-2, str);
-		if (*start == NULL || *stop == NULL) {
-			printf("Error: could not find enclosing braces of outer scope\n");
-			exit(1);
-		}
-	}
 	return;
 }
 
@@ -216,7 +164,6 @@ void copy_parameter_type(Parameter *dest, Parameter *src) {
 		dest->content = (void*) list;
 		ParameterList *src_list = (ParameterList*) src->content;
 		while (true) {
-			//print_parameter(&(src_list->p));
 			// Copy list entry
 			copy_parameter_type(&(list->p), &(src_list->p));
 			// Advance source list
@@ -346,6 +293,7 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 }
 
 // gets {...}
+// TODO this is massive, refactor
 void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_mode mode) {
 	if (start == NULL || stop == NULL) {
 		p->name[PARAMETER_NAME_LEN] = '\0';
@@ -371,10 +319,11 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		stop -= 1;
 	}
 
-	//printf("%s %s\n", p->name, p->type);
 	if (strcmp(p->type, "ParamMap") == 0 || strcmp(p->type, "Pipe") == 0) {
 		parse_parameter_list(p, start, stop, mode);
-		//printf("%s %s\n", p->name, p->type);
+		#ifdef DEBUG_PARAMETERS
+		printf("%s %s\n", p->name, p->type);
+		#endif
 	}
 	else if (strcmp(p->type, "ParamArray") == 0) {
 		// TODO: The below line is for cases where a { } is enough to signify an empty array/map instead of { {} {} ...}
@@ -435,7 +384,9 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			// Parse the ParamArray contents, but also need to copy type
 			parse_parameter_content((Parameter *)p->content, start, stop, parse_content | copy_type);
 		}
-		//printf("%s %s\n", p->name, p->type);
+		#ifdef DEBUG_PARAMETERS
+		printf("%s %s\n", p->name, p->type);
+		#endif
 	}
 	else if (strcmp(p->type, "ParamFunctor") == 0 || strcmp(p->type, "PipeService") == 0) {
 		if (mode & parse_type) {
@@ -475,7 +426,9 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 
 		// TODO: can a functor be in a ParamArray?
 		if (mode & parse_content) parse_parameter_list((Parameter *) p->content, start, stop, mode);
-		//printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
+		#ifdef DEBUG_PARAMETERS
+		printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
+		#endif
 	}
 	else if (mode & parse_content) { // Atomic parameters
 		if (strcmp(p->type, "ParamString") == 0) {
@@ -488,7 +441,9 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			memcpy(content, str_start, str_len);
 			content[str_len] = '\0';
 			p->content = (void *) content;
-			//printf("%s %s %s %d\n", p->name, p->type, (char *) p->content, str_len);
+			#ifdef DEBUG_PARAMETERS
+			printf("%s %s %s %ld\n", p->name, p->type, (char *) p->content, str_len);
+			#endif
 		}
 		else if (strcmp(p->type, "ParamLong") == 0) {
 			start += strspn(start, " \n\r\t");
@@ -496,7 +451,9 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			if (start == stop) return;
 			int64_t *content = (int64_t *) &(p->content);
 			*content = strtol(start, NULL, 10);
-			//printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
+			#ifdef DEBUG_PARAMETERS
+			printf("%s %s %li\n", p->name, p->type, (int64_t) p->content);
+			#endif
 		}
 		else if (strcmp(p->type, "ParamDouble") == 0) {
 			start += strspn(start, " \n\r\t");
@@ -504,7 +461,9 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			if (start == stop) return;
 			double *content = (double *) &(p->content);
 			*content = strtod(start, NULL);
-			//printf("%s %s %lf\n", p->name, p->type, (double) *content);
+			#ifdef DEBUG_PARAMETERS
+			printf("%s %s %lf\n", p->name, p->type, (double) *content);
+			#endif
 		}
 		else if (strcmp(p->type, "ParamBool") == 0) {
 			char *definitions = find('<', start, stop); // yeah not parsing these
@@ -524,11 +483,13 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 				exit(1);
 			}
 			p->content = (void *) value;
-			//printf("%s %s %d\n", p->name, p->type, (size_t) p->content);
+			#ifdef DEBUG_PARAMETERS
+			printf("%s %s %ld\n", p->name, p->type, (size_t) p->content);
+			#endif
 		}
 		else {
 			//printf("%s\n", p->type);
-			// Throw error when finished with all types
+			// Throw error when finished with all types?
 		}
 	}
 	else {
@@ -536,3 +497,124 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	}
 	return;
 }
+
+
+
+Protocol read_protocol(FILE* f)
+{
+	Protocol protocol;
+	safe_fread(f, &protocol, 2 * sizeof(uint32_t)); // read length and num
+
+	protocol.parameters = (Parameter*) malloc(protocol.num * sizeof(Parameter));
+
+	for (int p = 0; p < protocol.num; p++) {
+
+		const char parameter_set_type[] = "ParamSet";
+		strcpy(protocol.parameters[p].type, parameter_set_type);
+
+		char *name = (char*) &(protocol.parameters[p].name);
+		for (int j = 0; j < 48; j++) {
+			char c = fgetc(f);
+			check_file(f);
+			name[j] = c;
+			if (c == '\0') break;
+		}
+
+		uint32_t len;
+		safe_fread(f, &len, sizeof(uint32_t));
+		char *parameters_str = malloc(sizeof(uint32_t) + len);
+		memcpy(parameters_str, &len, sizeof(uint32_t));
+		safe_fread(f, parameters_str + sizeof(uint32_t), len);
+		protocol.parameters[p].content = (void *) parameters_str;
+	}
+	return protocol;
+}
+
+
+
+void parse_protocol_parameters(Parameter *parameter)
+{
+	char *str = parameter->content;
+	uint32_t len = *((uint32_t *) str);
+	char *parameters_str = str + sizeof(uint32_t);
+	char *start, *stop;
+
+	if (strcmp(parameter->name, "Config") == 0) {
+		// Check initial signature
+		char signature[] = "<XProtocol>";
+		size_t signature_length = sizeof(signature)-1;
+		if (strncmp(parameters_str, signature, signature_length) != 0) {
+			printf("Error: parameter string doesn't start as expected:\n");
+			debug(parameters_str, signature_length);
+			printf("\n");
+			exit(1);
+		}
+		// Set new start and stop pointers of string
+		// TODO: this could be done better?
+		start = find('{', parameters_str, parameters_str+len-1);
+		stop = find('}', parameters_str+len-2, parameters_str);
+		if (start == NULL || stop == NULL) {
+			printf("Error: could not find enclosing braces of outer scope\n");
+			exit(1);
+		}
+		start = find('{', start+1, stop);
+		stop = find_matching(start, '}');
+		strcpy(parameter->type, "ParamMap");
+		parse_parameter_content(parameter, start, stop, parse_type | parse_content);
+	}
+	else if (strcmp(parameter->name, "MeasYaps") == 0) {
+		// Check initial signature
+		char signature[] = "### ASCCONV BEGIN ";
+		size_t signature_length = sizeof(signature)-1;
+		if (strncmp(parameters_str, signature, signature_length) != 0) {
+			printf("Error: parameter string doesn't start as expected:\n");
+			debug(parameters_str, signature_length);
+			printf("\n");
+			exit(1);
+		}
+		start = strstr(parameters_str + signature_length, " ###") + 4;
+		stop = start + len - sizeof("### ASCCONV END ###") - 132; // Mysterious offset :(
+		// TODO
+		printf("Warning: Skipping MeasYaps parameter set\n");
+		return;
+	}
+	else if (strcmp(parameter->name, "Meas") == 0) {
+		// TODO: should be similar to "Config"
+		printf("Warning: Skipping Meas parameter set\n");
+		return;
+	}
+	else if (strcmp(parameter->name, "Phoenix") == 0) {
+		// TODO
+		printf("Warning: Skipping Phoenix parameter set\n");
+		return;
+	}
+	else if (strcmp(parameter->name, "Dicom") == 0) {
+		// TODO
+		printf("Warning: Skipping Dicom parameter set\n");
+		return;
+	}
+	else if (strcmp(parameter->name, "Spice") == 0) {
+		// TODO
+		printf("Warning: Skipping Spice parameter set\n");
+		return;
+	}
+	else {
+		printf("Error: unknown parameter set name %s\n", parameter->name);
+		exit(1);
+	}
+	free(str);
+
+	return;
+}
+
+
+
+// TODO add filters?
+void parse_protocol(Protocol protocol)
+{
+	for (int p = 0; p < protocol.num; p++) parse_protocol_parameters(&(protocol.parameters[p]));
+	return;
+}
+
+
+
