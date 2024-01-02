@@ -4,9 +4,6 @@
 #define PARAMETER_TYPE_LEN 16
 #define DEBUG_PARAMETERS
 
-typedef struct Protocol Protocol;
-typedef struct Parameter Parameter;
-typedef struct ParameterList ParameterList;
 
 struct Protocol
 {
@@ -499,39 +496,6 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 }
 
 
-
-Protocol read_protocol(FILE* f)
-{
-	Protocol protocol;
-	safe_fread(f, &protocol, 2 * sizeof(uint32_t)); // read length and num
-
-	protocol.parameters = (Parameter*) malloc(protocol.num * sizeof(Parameter));
-
-	for (int p = 0; p < protocol.num; p++) {
-
-		const char parameter_set_type[] = "ParamSet";
-		strcpy(protocol.parameters[p].type, parameter_set_type);
-
-		char *name = (char*) &(protocol.parameters[p].name);
-		for (int j = 0; j < 48; j++) {
-			char c = fgetc(f);
-			check_file(f);
-			name[j] = c;
-			if (c == '\0') break;
-		}
-
-		uint32_t len;
-		safe_fread(f, &len, sizeof(uint32_t));
-		char *parameters_str = malloc(sizeof(uint32_t) + len);
-		memcpy(parameters_str, &len, sizeof(uint32_t));
-		safe_fread(f, parameters_str + sizeof(uint32_t), len);
-		protocol.parameters[p].content = (void *) parameters_str;
-	}
-	return protocol;
-}
-
-
-
 void parse_protocol_parameters(Parameter *parameter)
 {
 	char *str = parameter->content;
@@ -610,11 +574,101 @@ void parse_protocol_parameters(Parameter *parameter)
 
 
 // TODO add filters?
+// TODO: required?
 void parse_protocol(Protocol protocol)
 {
 	for (int p = 0; p < protocol.num; p++) parse_protocol_parameters(&(protocol.parameters[p]));
+
+	// TODO free initially allocated string buffer (where raw protocol was stored)
 	return;
 }
 
 
+void read_protocol_header(FILE* f, Protocol* protocol)
+{
+	safe_fread(f, protocol, 2 * sizeof(uint32_t)); // read length and num
+
+	protocol->parameters = (Parameter*) malloc(protocol->num * sizeof(Parameter));
+
+	for (int p = 0; p < protocol->num; p++) {
+
+		const char parameter_set_type[] = "ParamSet";
+		strcpy(protocol->parameters[p].type, parameter_set_type);
+
+		char *name = (char*) &(protocol->parameters[p].name);
+		for (int j = 0; j < 48; j++) {
+			char c = fgetc(f);
+			check_file(f);
+			name[j] = c;
+			if (c == '\0') break;
+		}
+
+		char *protocol_info = malloc(sizeof(uint32_t) + sizeof(long));
+
+		uint32_t len;
+		safe_fread(f, &len, sizeof(uint32_t));
+		memcpy(protocol_info, &len, sizeof(uint32_t));
+
+		long filepos = ftell(f);
+		memcpy(protocol_info + sizeof(uint32_t), &filepos, sizeof(long));
+
+		protocol->parameters[p].content = (void *) protocol_info;
+
+		fseek(f, len, SEEK_CUR);
+	}
+	return;
+}
+
+void read_protocol(FILE *f, Protocol *protocol, int index)
+{
+	uint32_t *protocol_info = (uint32_t *) protocol->parameters[index].content;
+	uint32_t len = protocol_info[0];
+
+	fseek(f, *((long *)(&protocol_info[1])), SEEK_SET);
+
+	char *parameters_str = malloc(sizeof(uint32_t) + len);
+	memcpy(parameters_str, &len, sizeof(uint32_t));
+	safe_fread(f, parameters_str + sizeof(uint32_t), len);
+	free(protocol->parameters[index].content);
+	protocol->parameters[index].content = (void *) parameters_str;
+
+	return;
+}
+
+
+void twix_load_protocol(Twix *twix, int scan, char *name)
+{
+	FILE* f = twix->f;
+	fseek(f, twix->file_header->entries[scan].offset, SEEK_SET);
+
+	Protocol *protocol = &(twix->protocols[scan]);
+	Parameter *parameters = protocol->parameters;
+	int p;
+	for (p = 0; p < protocol->num; p++) {
+		if (strcmp(parameters[p].name, name) == 0) break;
+	}
+
+	if (p == protocol->num) {
+		printf("Error: protocol %s not found\n", name);
+		exit(EXIT_FAILURE);
+	}
+
+	read_protocol(f, protocol, p);
+	parse_protocol_parameters(parameters + p);
+
+	return;
+}
+
+
+
+char* get_raw_protocol(Twix *twix, int scan)
+{
+	return NULL;
+}
+
+
+char* get_scan_name(Twix* twix, int scan)
+{
+	return NULL;
+}
 

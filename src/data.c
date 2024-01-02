@@ -1,11 +1,15 @@
 
 #include "dataflags.c"
 #define SCANDATABLOCKLEN 128 // How many readout headers are in one block in ScanData
+#define DEBUG_READOUT
+		
+// TODO:
+// Apparently there is another readout registered at the end, no idea what syncdata is (in between meas?)
+// SYNCDATA
+// ACQEND
+
 
 // TODO: Make diagram of data structure
-typedef struct ScanData ScanData; // Pointers into buffer holding scan data are stored here
-typedef struct ReadoutHeader ReadoutHeader; // Formerly called measurement data header (MDH), information for single readout
-typedef struct ChannelHeader ChannelHeader; // Information of a single channel, placed just after the readout header and before the readout of every channel
 
 struct ScanData
 {
@@ -192,6 +196,7 @@ void free_scan_data(ScanData scan_data)
 
 
 // TODO: how to use num_bytes to only read a certain number of readouts? How is e.g. a measurement/average indicated?
+// Could say read n readouts, skipping the sync and other special ones
 ScanData read_data(FILE *f, size_t num_bytes)
 {
 	// Read in scan data
@@ -211,7 +216,7 @@ ScanData read_data(FILE *f, size_t num_bytes)
 		if (scan_data.index == SCANDATABLOCKLEN) {
 			scan_data.index = 0;
 			scan_data.block += 1;
-			// TODO: I want to say something nice about IT and how difficult it can be to keep stuff up to date
+			// TODO: once servers are updated use this instead of realloc...
 			//scan_data.hdrs = (ReadoutHeader ***)reallocarray(
 			//	scan_data.hdrs,
 			//	scan_data.block+1,
@@ -226,7 +231,9 @@ ScanData read_data(FILE *f, size_t num_bytes)
 			);
 		}
 		ReadoutHeader *readout_hdr = (ReadoutHeader *)pos;
-		//print_readout_header(readout_hdr);
+		#ifdef DEBUG_READOUT
+		print_readout_header(readout_hdr);
+		#endif
 		scan_data.hdrs[scan_data.block][scan_data.index] = readout_hdr;
 		scan_data.index += 1;
 		pos += get_readout_num_bytes(readout_hdr);
@@ -246,6 +253,29 @@ ScanData read_data(FILE *f, size_t num_bytes)
 		scan_data.hdrs[scan_data.block],
 		scan_data.index * sizeof(ReadoutHeader*)
 	);
+
+	// Note: eof is not reached yet, residual bytes are just zeros I think, why?
 	return scan_data;
+}
+
+
+void twix_load_data(Twix* twix, int scan)
+{
+	FILE* f = twix->f;
+	size_t protocol_length = twix->protocols[scan].length;
+	size_t file_pos  = twix->file_header->entries[scan].offset + protocol_length;
+	size_t num_bytes = twix->file_header->entries[scan].len    - protocol_length;
+	fseek(f, file_pos, SEEK_SET);
+
+	ScanData data = read_data(f, num_bytes);
+
+	// TODO could be better, maybe remove
+	if (data.hdrs == NULL)
+		printf("Error: skipping scan %d, too few bytes (%ld < %ld)\n", scan, num_bytes, sizeof(ReadoutHeader));
+
+	if (twix->data == NULL) twix->data = (ScanData *) malloc(sizeof(ScanData) * twix->file_header->num_scans);
+	twix->data[scan] = data;
+
+	return;
 }
 

@@ -1,5 +1,6 @@
 // --- Check for NULL ---
 
+// TODO: use more
 void check_pointer(void *ptr, const char *fmt, ...)
 {
 	if (ptr != NULL) return;
@@ -16,6 +17,7 @@ void check_pointer(void *ptr, const char *fmt, ...)
 
 // --- Safely working with files ---
 
+// Doesn't check f == NULL...
 void check_file(FILE *f)
 {
 	if (feof(f)) printf("Error: read EOF\n");

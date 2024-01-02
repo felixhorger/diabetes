@@ -1,7 +1,4 @@
 
-typedef struct FileHeader FileHeader; // first to be read in
-typedef struct ScanHeader ScanHeader; // one for e.g. reference scan, actual scan, ...
-
 struct ScanHeader
 {
 	uint32_t id;
@@ -21,9 +18,9 @@ struct FileHeader
 
 
 
-void check_file_header(FileHeader file_header)
+void check_file_header(FileHeader *file_header)
 {
-	if (file_header.version >= 10000 || file_header.num_scans > 64) {
+	if (file_header->version >= 10000 || file_header->num_scans > 64) {
 		printf("Error: unsupported twix version\n");
 		exit(1);
 	}
@@ -31,17 +28,17 @@ void check_file_header(FileHeader file_header)
 }
 
 
-void print_file_header(FileHeader file_header)
+void print_file_header(FileHeader *file_header)
 {
 	printf(
 		"File header:\n"
 		"Version         %d\n"
 		"Number of scans %d\n",
-		file_header.version,
-		file_header.num_scans
+		file_header->version,
+		file_header->num_scans
 	);
 
-	for (int s = 0; s < file_header.num_scans; s++) {
+	for (int s = 0; s < file_header->num_scans; s++) {
 		printf(
 			"-----\n"
 			"Scan:     %d\n"
@@ -52,12 +49,12 @@ void print_file_header(FileHeader file_header)
 			"Patient:  %s\n"
 			"Protocol: %s\n-----",
 			s,
-			file_header.entries[s].id,
-			file_header.entries[s].fileid,
-			file_header.entries[s].offset,
-			file_header.entries[s].len,
-			file_header.entries[s].patient_name,
-			file_header.entries[s].protocol_name
+			file_header->entries[s].id,
+			file_header->entries[s].fileid,
+			file_header->entries[s].offset,
+			file_header->entries[s].len,
+			file_header->entries[s].patient_name,
+			file_header->entries[s].protocol_name
 		);
 	}
 	return;
