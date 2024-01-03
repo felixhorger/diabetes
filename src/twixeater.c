@@ -15,8 +15,8 @@ typedef struct ScanData ScanData; // Pointers into buffer holding scan data are 
 typedef struct ReadoutHeader ReadoutHeader; // Formerly called measurement data header (MDH), information for single readout
 typedef struct ChannelHeader ChannelHeader; // Information of a single channel, placed just after the readout header and before the readout of every channel
 typedef struct Twix Twix;
-
-struct Twix {
+struct Twix
+{
 	FILE* f;
 	FileHeader *file_header;
 	Protocol *protocols;
@@ -88,6 +88,7 @@ void twix_close(Twix* twix)
 	// TODO: these two need freeing of all substructures
 	free(twix->protocols);
 	free(twix->data);
+	free(twix);
 	//
 	return;
 }
@@ -102,11 +103,10 @@ int main(int argc, char* argv[])
 	}
 
 	Twix* twix = twix_open(argv[1]);
+	//twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
 	twix_load_protocol(twix, 0, "Config");
-	twix_load_data(twix, 0);
+	//twix_load_data(twix, 0);
 	twix_close(twix);
-	free(twix);
-
 
 	return 0;
 }
