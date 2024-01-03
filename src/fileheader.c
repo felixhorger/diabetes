@@ -12,7 +12,7 @@ struct ScanHeader
 struct FileHeader
 {
 	uint32_t version;
-	uint32_t num_scans;
+	uint32_t num_scans; // TODO: need to check scan < num_scans in all functions. write function to do that
 	ScanHeader entries[64];
 };
 
@@ -58,5 +58,12 @@ void print_file_header(FileHeader *file_header)
 		);
 	}
 	return;
+}
+
+
+
+char* twix_scan_name(Twix* twix, int scan)
+{
+	return twix->file_header->entries[scan].protocol_name;
 }
 
