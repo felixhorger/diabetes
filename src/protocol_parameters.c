@@ -521,76 +521,82 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	return;
 }
 
+void parse_config_protocol(Parameter* parameter, char* str, size_t len)
+{
+	// Check initial signature
+	char signature[] = "<XProtocol>";
+	size_t signature_length = sizeof(signature)-1;
+	if (strncmp(str, signature, signature_length) != 0) {
+		printf("Error: parameter string doesn't start as expected:\n");
+		debug(str, signature_length);
+		printf("\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char *start, *stop;
+	start = find('{', str, str+len-1);
+	stop = find('}', str+len-2, str);
+	if (start == NULL || stop == NULL) {
+		printf("Error: could not find enclosing braces of outer scope\n");
+		exit(EXIT_FAILURE);
+	}
+
+	start = find('{', start+1, stop);
+	stop = find_matching(start, '}');
+	strcpy(parameter->type, "ParamMap");
+
+	parse_parameter_content(parameter, start, stop, parse_type | parse_content);
+
+	return;
+}
+
+void parse_measyaps_protocol(Parameter* parameter, char* str, size_t len)
+{
+	char signature[] = "### ASCCONV BEGIN ";
+	size_t signature_length = sizeof(signature)-1;
+	if (strncmp(str, signature, signature_length) != 0) {
+		printf("Error: parameter string doesn't start as expected:\n");
+		debug(str, signature_length);
+		printf("\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char *start, *stop;
+	start = strstr(str + signature_length, " ###") + 4;
+	stop = start + len - sizeof("### ASCCONV END ###") - 132; // Mysterious offset :(
+	// TODO
+	printf("Warning: Skipping MeasYaps parameter set (bogus %s)\n", stop);
+	return;
+}
+
 // the top-most container of protocols i.e. Config, Meas, MeasYaps, ...
 void parse_protocol(Parameter *parameter)
 {
 	char *str = parameter->content;
 	uint32_t len = *((uint32_t *)(str + sizeof(long)));
 	char *parameters_str = str + sizeof(long) + sizeof(uint32_t); // advance by filepos and length
-	char *start, *stop;
 
-	if (strcmp(parameter->name, "Config") == 0) {
-		// Check initial signature
-		char signature[] = "<XProtocol>";
-		size_t signature_length = sizeof(signature)-1;
-		if (strncmp(parameters_str, signature, signature_length) != 0) {
-			printf("Error: parameter string doesn't start as expected:\n");
-			debug(parameters_str, signature_length);
-			printf("\n");
-			exit(1);
-		}
-		// Set new start and stop pointers of string
-		// TODO: this could be done better?
-		start = find('{', parameters_str, parameters_str+len-1);
-		stop = find('}', parameters_str+len-2, parameters_str);
-		if (start == NULL || stop == NULL) {
-			printf("Error: could not find enclosing braces of outer scope\n");
-			exit(1);
-		}
-		start = find('{', start+1, stop);
-		stop = find_matching(start, '}');
-		strcpy(parameter->type, "ParamMap");
-		parse_parameter_content(parameter, start, stop, parse_type | parse_content);
-	}
-	else if (strcmp(parameter->name, "MeasYaps") == 0) {
-		// Check initial signature
-		char signature[] = "### ASCCONV BEGIN ";
-		size_t signature_length = sizeof(signature)-1;
-		if (strncmp(parameters_str, signature, signature_length) != 0) {
-			printf("Error: parameter string doesn't start as expected:\n");
-			debug(parameters_str, signature_length);
-			printf("\n");
-			exit(1);
-		}
-		start = strstr(parameters_str + signature_length, " ###") + 4;
-		stop = start + len - sizeof("### ASCCONV END ###") - 132; // Mysterious offset :(
-		// TODO
-		printf("Warning: Skipping MeasYaps parameter set\n");
-		return;
-	}
+	if (strcmp(parameter->name, "Config") == 0)        parse_config_protocol(parameter, parameters_str, len);
+	else if (strcmp(parameter->name, "MeasYaps") == 0) parse_measyaps_protocol(parameter, parameters_str, len);
 	else if (strcmp(parameter->name, "Meas") == 0) {
 		// TODO: should be similar to "Config"
 		printf("Warning: Skipping Meas parameter set\n");
-		return;
 	}
 	else if (strcmp(parameter->name, "Phoenix") == 0) {
 		// TODO
 		printf("Warning: Skipping Phoenix parameter set\n");
-		return;
 	}
 	else if (strcmp(parameter->name, "Dicom") == 0) {
 		// TODO
 		printf("Warning: Skipping Dicom parameter set\n");
-		return;
 	}
 	else if (strcmp(parameter->name, "Spice") == 0) {
 		// TODO
 		printf("Warning: Skipping Spice parameter set\n");
-		return;
 	}
 	else {
 		printf("Error: unknown parameter set name %s\n", parameter->name);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	free(str);
 
