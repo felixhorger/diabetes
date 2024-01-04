@@ -15,6 +15,7 @@ typedef struct ScanData ScanData; // Pointers into buffer holding scan data are 
 typedef struct ReadoutHeader ReadoutHeader; // Formerly called measurement data header (MDH), information for single readout
 typedef struct ChannelHeader ChannelHeader; // Information of a single channel, placed just after the readout header and before the readout of every channel
 typedef struct Twix Twix;
+
 struct Twix
 {
 	FILE* f;
@@ -30,27 +31,13 @@ struct Twix
 
 
 /* TODO:
-Loading data:
-Better approach for top level usage (all functions must set their position in file, how?):
-twix = twix_open(name); // Just opens the file and reads the header, nothing else
-// twix is a struct holding the file pointer, file_header and *protocols and *data from above
-twix_load_protocol(twix); // reads the protocol and parses it, because why would you read it without using it? For users that want more control, there are still the low-level functions, how about exporting them? Would need to add twix_ to everyone of them. Also think about which data types need to be exported.
 twix_get_size(twix); // applied to the main twix struct
+Functionality to get scan data and sampling indices.
+better functions for protocols
 twix_get_TE(twix);
 kspace = twix_get_kspace(twix); // reads in all the data, in which form? Check for the special ones not containing data.
-kspace = twix_filter_kspace(twix, filter_func()); // could also filter, filter_func can return 0 for ok, 1 for no, 2 for stop reading. What happens with the pointer structure then, being finished "half way"?
-twix_close(twix); // Frees memory and closes the file, internally can have function twix_free_data, twix_free_protocol etc which the user can also have available
-
+? kspace = twix_filter_kspace(twix, filter_func()); // could also filter, filter_func can return 0 for ok, 1 for no, 2 for stop reading. What happens with the pointer structure then, being finished "half way"?
 */
-
-// TODO: Functionality to get scan data and sampling indices.
-// TODO: better functions for protocols
-// TODO: functionality to free protocol and other memory 
-// TODO: load all scans: for (int scan = 0; scan < file_header.num_scans; scan++) {
-
-
-
-
 
 
 Twix* twix_open(char *filename)
@@ -66,11 +53,11 @@ Twix* twix_open(char *filename)
 	check_file_header(file_header);
 	//print_file_header(file_header);
 
-	Twix* twix = (Twix *) malloc(sizeof(Twix));
+	Twix* twix = (Twix *) calloc(1, sizeof(Twix));
 	twix->f = f;
 	twix->file_header = file_header;
 
-	twix->protocols = (Protocol *) malloc(sizeof(Protocol) * file_header->num_scans);
+	twix->protocols = (Protocol *) calloc(1, sizeof(Protocol) * file_header->num_scans);
 	for (int scan = 0; scan < file_header->num_scans; scan++) {
 		fseek(f, file_header->entries[scan].offset, SEEK_SET);
 		read_protocol_header(f, twix->protocols + scan);
@@ -82,14 +69,21 @@ Twix* twix_open(char *filename)
 
 void twix_close(Twix* twix)
 {
-	fclose(twix->f);
-	free(twix->file_header);
-
-	// TODO: these two need freeing of all substructures
+	for (int scan = 0; scan < twix->file_header->num_scans; scan++) {
+		Protocol *protocol = twix->protocols + scan;
+		Parameter *params = protocol->parameters;
+		for (int p = 0; p < protocol->num; p++) free_parameter(params + p);
+		free(params);
+	}
 	free(twix->protocols);
+
+	// TODO: needs freeing of all substructures
 	free(twix->data);
+
+	free(twix->file_header);
+	fclose(twix->f);
 	free(twix);
-	//
+
 	return;
 }
 

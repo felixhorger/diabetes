@@ -30,14 +30,6 @@ struct ParameterList
 enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
 
 
-//void free
-//
-//void free_parameter_list()
-//{
-//
-//}
-
-
 #include "protocol_parameters.c"
 
 
@@ -46,12 +38,11 @@ void read_protocol_header(FILE* f, Protocol* protocol)
 {
 	safe_fread(f, protocol, 2 * sizeof(uint32_t)); // read length and num
 
-	protocol->parameters = (Parameter*) malloc(protocol->num * sizeof(Parameter));
+	protocol->parameters = (Parameter*) calloc(1, protocol->num * sizeof(Parameter));
 
 	for (int p = 0; p < protocol->num; p++) {
 
-		const char parameter_set_type[] = "ParamSet";
-		strcpy(protocol->parameters[p].type, parameter_set_type);
+		strcpy(protocol->parameters[p].type, "NotLoaded");
 
 		char *name = (char*) &(protocol->parameters[p].name);
 		for (int j = 0; j < 48; j++) {
@@ -79,6 +70,8 @@ void read_protocol_header(FILE* f, Protocol* protocol)
 
 void read_protocol(FILE *f, Protocol *protocol, int index)
 {
+	strcpy(protocol->parameters[index].type, "ReadParamSet");
+
 	char *protocol_info = (char *) protocol->parameters[index].content;
 	long filepos = *((long *)protocol_info);
 	uint32_t len = *((uint32_t *)(protocol_info + sizeof(long)));

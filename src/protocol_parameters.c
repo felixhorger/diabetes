@@ -1,4 +1,13 @@
-// Get parameter value
+bool is_parameter_type(Parameter *p, char *type)
+{
+	check_pointer(p,    "is_parameter_type(%p, type)", p);
+	check_pointer(type, "is_parameter_type(p, %p)",    type);
+	if (strncmp(p->type, type, PARAMETER_TYPE_LEN) == 0) return true;
+	else return false;
+}
+
+
+
 double get_double_parameter(Parameter *p)
 {
 	check_pointer(p, "get_double_parameter(NULL)");
@@ -26,9 +35,9 @@ char *get_string_parameter(Parameter *p)
 Parameter* index_parameter_map(Parameter *p, int i)
 {
 	check_pointer(p, "index_parameter_map(NULL, i)");
-	if (strcmp(p->type, "ParamMap") != 0) {
-		printf("Error: not a ParamArray\n");
-		exit(1);
+	if (!is_parameter_type(p, "ParamMap")) {
+		printf("Error: not a ParamMap\n");
+		exit(EXIT_FAILURE);
 	}
 	ParameterList *list = (ParameterList *) p->content;
 	if (i == -1) return &(list->p); // Special, because first element is used for type
@@ -37,7 +46,7 @@ Parameter* index_parameter_map(Parameter *p, int i)
 		list = list->next;
 		if (list == NULL) {
 			printf("Error: parameter array index %d out of bounds\n", i);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 	return &(list->p);
@@ -57,14 +66,6 @@ Parameter* index_parameter_array(Parameter *p, int i)
 
 
 // Debug parameter
-bool is_parameter_type(Parameter *p, char *type)
-{
-	check_pointer(p,    "is_parameter_type(%p, type)", p);
-	check_pointer(type, "is_parameter_type(p, %p)",    type);
-	if (strncmp(p->type, type, PARAMETER_TYPE_LEN) == 0) return 1;
-	else return 0;
-}
-
 void print_parameter(Parameter *p)
 {
 	check_pointer(p, "print_parameter(NULL)");
@@ -119,7 +120,7 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop)
 	check_pointer(closing_quote, "parse_parameter(): closing quote not found");
 	size_t diff = closing_quote - start;
 	if (diff > 0) {
-		strncpy(p->name, start, diff);
+		memcpy(p->name, start, diff);
 		p->name[diff] = '\0';
 	}
 	else {
@@ -188,7 +189,9 @@ void copy_parameter_type(Parameter *dest, Parameter *src)
 	strcpy(dest->name, src->name);
 	strcpy(dest->type, src->type);
 	if (strcmp(src->type, "ParamMap") == 0) {
-		ParameterList *list = (ParameterList*) calloc(1, sizeof(ParameterList));
+		ParameterList *list, *list_head;
+		list_head = (ParameterList*) calloc(1, sizeof(ParameterList));
+		list = list_head;
 		dest->content = (void*) list;
 		ParameterList *src_list = (ParameterList*) src->content;
 		while (true) {
@@ -201,6 +204,7 @@ void copy_parameter_type(Parameter *dest, Parameter *src)
 			list->next = (ParameterList*) calloc(1, sizeof(ParameterList));
 			list->next->prev = list;
 			list = list->next;
+			list_head->prev = list;
 		}
 	}
 	else if (strcmp(src->type, "ParamArray") == 0) {
@@ -269,7 +273,7 @@ void parse_bool_parameter(void** content, char* start, char* stop)
 	char *str_stop = find('"', str_start, stop);
 	size_t len = str_stop - str_start;
 
-	char *str = (char *) malloc(len+1);
+	char *str = (char *) malloc(len + 1);
 	memcpy(str, str_start, len);
 	str[len] = '\0';
 
@@ -299,16 +303,18 @@ ParameterList* append_new_entry(ParameterList* list)
 void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode mode)
 {
 	// Set up list of parameters
-	ParameterList *list;
+	ParameterList *list, *list_head;
 	if (mode & parse_type) {
-		// Make new list, names and types are to be filled in
+		// For ParamMap (and parsing type of ParamArray), make new list,
+		// names and types are to be filled in
 		list = (ParameterList*) calloc(1, sizeof(ParameterList));
 		p->content = (void*) list;
 	}
 	else {
 		// For ParamArray, names and types have been filled already (first element)
-		list = (ParameterList*) p->content;
+		list = (ParameterList *)p->content;
 	}
+	list_head = list;
 	Parameter* current_p;
 
 	// Append all entries to list
@@ -334,11 +340,13 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 		else {
 			// Map, advance by first list element
 			list = list->next;
+			current_p = &(list->p);
 			if (list == NULL) {
 				printf("Error: ParamArray type definition inconsistent with value \n");
 				exit(EXIT_FAILURE);
 			}
 		}
+		list_head->prev = list;
 
 		// Find enclosing scope
 		start = find('{', start, stop);
@@ -369,10 +377,9 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	if (start == NULL || stop == NULL) {
 		p->name[PARAMETER_NAME_LEN] = '\0';
 		printf("Error: parsing parameter %s: start (%p) or stop (%p) is NULL\n", p->name, start, stop);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
-	//printf("%s %s %d\n", p->name, p->type, mode);
 	if ((mode & copy_type) == 0) { // is copy_type off?
 		/*	Problem is that with normal ParamMap, there are extra curly braces
 			But with ParamMap used for the ParamArray there aren't.
@@ -384,7 +391,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		//debug(start, stop-start);
 		if (start == NULL || stop == NULL) {
 			printf("Error: parsing %s: could not find enclosing braces of parameter scope\n", p->name);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		start += 1;
 		stop -= 1;
@@ -399,6 +406,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	else if (strcmp(p->type, "ParamArray") == 0) {
 		// TODO: The below line is for cases where a { } is enough to signify an empty array/map instead of { {} {} ...}
 		if (strcmp(p->name, "RxCoilSelects") == 0 || strcmp(p->name, "aRxCoilSelectData") == 0) return;
+
 		// Parse the type signature
 		if (mode & parse_type) {
 			// Find type signature
@@ -489,8 +497,8 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 					debug(start, len);
 					exit(1);
 				}
-				strncpy(p_functor->name, start, len);
-				p_functor->name[len+1] = '\0';
+				memcpy(p_functor->name, start, len);
+				p_functor->name[len] = '\0';
 				start = closing_quote + 1;
 			}
 		}
@@ -515,9 +523,8 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		print_parameter(p);
 		#endif
 	}
-	else {
-		// TODO: when does this happen?
-	}
+	// else: happens only if mode == parse_type and type is atomic
+
 	return;
 }
 
@@ -533,6 +540,11 @@ void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 		exit(EXIT_FAILURE);
 	}
 
+	Parameter *p = (void *) calloc(1, sizeof(Parameter));
+	strcpy(p->name, "XProtocol"); // has no name in file ... I decided to remove it from here
+	strcpy(p->type, "ParamMap");
+
+	// Find scope of XProtocol
 	char *start, *stop;
 	start = find('{', str, str+len-1);
 	stop = find('}', str+len-2, str);
@@ -540,12 +552,13 @@ void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 		printf("Error: could not find enclosing braces of outer scope\n");
 		exit(EXIT_FAILURE);
 	}
-
+	// Find scope of the empty-named ParamMap
 	start = find('{', start+1, stop);
 	stop = find_matching(start, '}');
-	strcpy(parameter->type, "ParamMap");
 
-	parse_parameter_content(parameter, start, stop, parse_type | parse_content);
+	parse_parameter_content(p, start, stop, parse_type | parse_content);
+
+	parameter->content = (void *)p;
 
 	return;
 }
@@ -572,6 +585,8 @@ void parse_measyaps_protocol(Parameter* parameter, char* str, size_t len)
 // the top-most container of protocols i.e. Config, Meas, MeasYaps, ...
 void parse_protocol(Parameter *parameter)
 {
+	strcpy(parameter->type, "ParamSet");
+
 	char *str = parameter->content;
 	uint32_t len = *((uint32_t *)(str + sizeof(long)));
 	char *parameters_str = str + sizeof(long) + sizeof(uint32_t); // advance by filepos and length
@@ -603,4 +618,55 @@ void parse_protocol(Parameter *parameter)
 	return;
 }
 
+
+
+
+// Freeing parameters
+void free_parameter(Parameter* p)
+{
+	printf("To free: %s %s\n", p->name, p->type);
+	if (
+		is_parameter_type(p, "ParamBool")   ||
+		is_parameter_type(p, "ParamLong")   ||
+		is_parameter_type(p, "ParamDouble")
+	) return;
+	else if (is_parameter_type(p, "ParamString")) free(p->content);
+	else if (is_parameter_type(p, "ParamMap") || is_parameter_type(p, "Pipe")) {
+		ParameterList *list, *list_head, *prev;
+		list_head = (ParameterList *)p->content;
+		list = list_head->prev;
+		if (list_head->p.type[0] != '\0') free_parameter(&(list_head->p));
+		free(list_head);
+		if (list == NULL) return;
+		while (list != list_head) {
+			//printf("pointers in parameter list %p %p %p\n", list, list->prev, list->next);
+			//printf("Current param in map %s %s\n", list->p.name, list->p.type);
+			free_parameter(&(list->p));
+			prev = list->prev;
+			free(list);
+			list = prev;
+		}
+		// Note: p->content is freed via list_head
+	}
+	else if (is_parameter_type(p, "ParamArray")) {
+		free_parameter((Parameter *)p->content);
+		free(p->content);
+	}
+	else if (is_parameter_type(p, "ParamFunctor") || is_parameter_type(p, "PipeService")) {
+		free_parameter((Parameter *)p->content);
+		free(p->content);
+	}
+	else if (is_parameter_type(p, "NotLoaded"))    free(p->content);
+	else if (is_parameter_type(p, "ReadParamSet")) free(p->content);
+	else if (is_parameter_type(p, "ParamSet")) {
+		free_parameter((Parameter *)p->content);
+		free(p->content);
+	}
+	else {
+		printf("Error: Could not free parameter \"%s\" of type \"%s\"\n", p->name, p->type);
+		exit(EXIT_FAILURE);
+	}
+
+	return;
+}
 
