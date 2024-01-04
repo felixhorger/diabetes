@@ -23,6 +23,9 @@ struct Twix
 	Protocol *protocols;
 	ScanData *data;
 };
+// TODO: add array with fixed order of protocols (Config, Meas, MeasYAPS, Dicom, ...)
+
+
 
 #include "fileheader.c"
 #include "protocols.c"
@@ -61,6 +64,7 @@ Twix* twix_open(char *filename)
 	for (int scan = 0; scan < file_header->num_scans; scan++) {
 		fseek(f, file_header->entries[scan].offset, SEEK_SET);
 		read_protocol_header(f, twix->protocols + scan);
+		memset(twix->protocols[scan].sets, -1, sizeof(twix->protocols[scan].sets));
 	}
 
 	return twix;
@@ -98,7 +102,12 @@ int main(int argc, char* argv[])
 
 	Twix* twix = twix_open(argv[1]);
 	//twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
-	twix_load_protocol(twix, 1, "Config");
+	twix_load_protocol(twix, 0, twix_config);
+	twix_load_protocol(twix, 0, twix_dicom);
+	twix_load_protocol(twix, 0, twix_meas);
+	int size[4];
+	twix_kspace_dims(twix, 0, size);
+	printf("kspace dims: %d %d %d\n", size[0], size[1], size[2]);
 	//twix_load_data(twix, 0);
 	twix_close(twix);
 

@@ -20,8 +20,8 @@ enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
 
 bool is_parameter_type(Parameter *p, char *type)
 {
-	check_pointer(p,    "is_parameter_type(%p, type)", p);
-	check_pointer(type, "is_parameter_type(p, %p)",    type);
+	check_pointer(p,    "is_parameter_type(%p, %s)", p, type);
+	check_pointer(type, "is_parameter_type(p, %p)",     type);
 	if (strncmp(p->type, type, PARAMETER_TYPE_LEN) == 0) return true;
 	else return false;
 }
@@ -52,7 +52,7 @@ char *get_string_parameter(Parameter *p)
 	return (char *) p->content;
 }
 
-Parameter* index_parameter_map(Parameter *p, int i)
+Parameter* index_parameter_map(Parameter *p, int i) // TODO: this is crap, need more like an iterator?
 {
 	check_pointer(p, "index_parameter_map(NULL, i)");
 	if (!is_parameter_type(p, "ParamMap")) {
@@ -61,6 +61,10 @@ Parameter* index_parameter_map(Parameter *p, int i)
 	}
 	ParameterList *list = (ParameterList *) p->content;
 	if (i == -1) return &(list->p); // Special, because first element is used for type
+	if (i < -1) {
+		printf("Error: provided index %d is smaller than -1\n", i);
+		exit(EXIT_FAILURE);
+	}
 	// All others follow
 	for (int j = -1; j < i; j++) {
 		list = list->next;
@@ -524,7 +528,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		stop -= 1;
 	}
 
-	if (is_parameter_type(p, "ParamMap"))          parse_parameter_list(p, start, stop, mode);
+	if      (is_parameter_type(p, "ParamMap"))     parse_parameter_list(p, start, stop, mode);
 	else if (is_parameter_type(p, "Pipe"))         parse_parameter_list(p, start, stop, mode);
 	else if (is_parameter_type(p, "ParamArray"))   parse_parameter_array(p, start, stop, mode);
 	else if (is_parameter_type(p, "ParamFunctor")) parse_parameter_functor(p, start, stop, mode);
@@ -535,6 +539,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		else if (strcmp(p->type, "ParamLong")   == 0) parse_long_parameter  (&(p->content), start, stop);
 		else if (strcmp(p->type, "ParamDouble") == 0) parse_double_parameter(&(p->content), start, stop);
 		else if (strcmp(p->type, "ParamBool")   == 0) parse_bool_parameter  (&(p->content), start, stop);
+		// else if (strcmp(p->type, "ParamChoice") == 0) TODO, also don't forget corresponding statement in free_parameter():
 		else {
 			//printf("%s\n", p->type);
 			// Throw error when finished with all types?
@@ -562,10 +567,6 @@ void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 		exit(EXIT_FAILURE);
 	}
 
-	Parameter *p = (void *) calloc(1, sizeof(Parameter));
-	strcpy(p->name, "XProtocol"); // has no name in file ... I decided to remove it from here
-	strcpy(p->type, "ParamMap");
-
 	// Find scope of XProtocol
 	char *start, *stop;
 	start = find('{', str, str+len-1);
@@ -578,10 +579,61 @@ void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 	start = find('{', start+1, stop);
 	stop = find_matching(start, '}');
 
-	parse_parameter_content(p, start, stop, parse_type | parse_content);
-
+	Parameter *p = (void *) calloc(1, sizeof(Parameter));
+	strcpy(p->name, "XProtocol"); // has no name in file ... I decided to remove it from here
+	strcpy(p->type, "ParamMap");
 	parameter->content = (void *)p;
 
+	parse_parameter_content(p, start, stop, parse_type | parse_content);
+
+	return;
+}
+
+void parse_meas_protocol(Parameter* parameter, char* str, size_t len)
+{
+	// TODO: overlap with config protocol, outsource
+	char signature[] = "<XProtocol>";
+	size_t signature_length = sizeof(signature)-1;
+	if (strncmp(str, signature, signature_length) != 0) {
+		printf("Error: parameter string doesn't start as expected:\n");
+		debug(str, signature_length);
+		printf("\n");
+		exit(EXIT_FAILURE);
+	}
+
+	// Find scope of XProtocol
+	char *start, *stop;
+	start = find('{', str, str+len-1);
+	stop = find('}', str+len-2, str);
+	if (start == NULL || stop == NULL) {
+		printf("Error: could not find enclosing braces of outer scope\n");
+		exit(EXIT_FAILURE);
+	}
+
+	// Find scope of the empty-named ParamMap
+	// Skip Name, ID, Userversion, EVAStringTable
+	// This is simplistic, might fail if "name" is weird
+	const char needle[] = "EVAStringTable";
+	do start = find('<', start+1, stop);
+	while (start != NULL && strncmp(start+1, needle, sizeof(needle)-1) != 0);
+	if (start == NULL) {
+		printf("Error: could not find EVAStringTable signature in Meas protocol\n");
+		exit(EXIT_FAILURE);
+	}
+
+	start = find('{', start+1, stop);
+	start = find_matching(start, '}'); // End of EVAStringTable block
+	start = find('{', start+1, stop); // Start of scope of encapsulating ParamMap with no name
+	stop = find_matching(start, '}');
+
+	Parameter *p = (void *) calloc(1, sizeof(Parameter));
+	strcpy(p->name, "XProtocol"); // has no name in file ... I decided to remove it from here
+	strcpy(p->type, "ParamMap");
+	parameter->content = (void *)p;
+
+	parse_parameter_content(p, start, stop, parse_type | parse_content);
+
+	// Rest in Meas is ignored since could find anything useful in there
 	return;
 }
 
@@ -635,6 +687,7 @@ void free_parameter(Parameter* p)
 		// Note: p->content is freed via list_head
 	}
 	else if (is_parameter_type(p, "ParamArray")) {
+		if (p->content == NULL) return; // This can happen ...
 		free_parameter((Parameter *)p->content);
 		free(p->content);
 	}
@@ -648,6 +701,7 @@ void free_parameter(Parameter* p)
 		free_parameter((Parameter *)p->content);
 		free(p->content);
 	}
+	else if (is_parameter_type(p, "ParamChoice")) { /* TODO: Not implemented */ }
 	else {
 		printf("Error: Could not free parameter \"%s\" of type \"%s\"\n", p->name, p->type);
 		exit(EXIT_FAILURE);

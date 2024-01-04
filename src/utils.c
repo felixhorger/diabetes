@@ -8,8 +8,9 @@ void check_pointer(void *ptr, const char *fmt, ...)
 	va_start(args, fmt);
 	vprintf(fmt, args);
 	va_end(args);
+	printf("\n");
 
-	exit(1);
+	exit(EXIT_FAILURE);
 }
 
 void check_bounds(int i, size_t n, char* msg)
@@ -26,7 +27,7 @@ void check_file(FILE *f)
 	else if (ferror(f)) printf("Error: read occurred while reading file\n");
 	else return;
 
-	exit(1);
+	exit(EXIT_FAILURE);
 }
 
 
@@ -62,6 +63,7 @@ char* find(char c, char *start, char *stop)
 
 
 // Looks for a char c in str, that matches *str in a sense that *str and c occur in pairs.
+// str* means the character str points to, not whole string
 char* find_matching(char *str, char c)
 {
 	char c0 = *str;
