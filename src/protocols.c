@@ -1,8 +1,8 @@
-
 #define min(a, b) (a) < (b) ? (a) : (b)
 #define PARAMETER_NAME_LEN 64
 #define PARAMETER_TYPE_LEN 16
 #define DEBUG_PARAMETERS
+
 
 
 struct Protocol
@@ -12,22 +12,6 @@ struct Protocol
 	Parameter *parameters;
 };
 
-struct Parameter
-{
-	char type[PARAMETER_TYPE_LEN];
-	char name[PARAMETER_NAME_LEN];
-	void *content;
-};
-
-struct ParameterList
-{
-	struct ParameterList* next;
-	struct ParameterList* prev;
-	Parameter p;
-};
-
-
-enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
 
 
 #include "protocol_parameters.c"
@@ -68,6 +52,8 @@ void read_protocol_header(FILE* f, Protocol* protocol)
 	return;
 }
 
+
+
 void read_protocol(FILE *f, Protocol *protocol, int index)
 {
 	strcpy(protocol->parameters[index].type, "ReadParamSet");
@@ -91,6 +77,44 @@ void read_protocol(FILE *f, Protocol *protocol, int index)
 }
 
 
+
+void parse_protocol(Parameter *parameter) // the top-most container of protocols i.e. Config, Meas, MeasYaps, ...
+{
+	strcpy(parameter->type, "ParamSet");
+
+	char *str = parameter->content;
+	uint32_t len = *((uint32_t *)(str + sizeof(long)));
+	char *parameters_str = str + sizeof(long) + sizeof(uint32_t); // advance by filepos and length
+
+	if (strcmp(parameter->name, "Config") == 0)        parse_config_protocol(parameter, parameters_str, len);
+	else if (strcmp(parameter->name, "MeasYaps") == 0) parse_measyaps_protocol(parameter, parameters_str, len);
+	else if (strcmp(parameter->name, "Meas") == 0) {
+		// TODO: should be similar to "Config"
+		printf("Warning: Skipping Meas parameter set\n");
+	}
+	else if (strcmp(parameter->name, "Phoenix") == 0) {
+		// TODO
+		printf("Warning: Skipping Phoenix parameter set\n");
+	}
+	else if (strcmp(parameter->name, "Dicom") == 0) {
+		// TODO
+		printf("Warning: Skipping Dicom parameter set\n");
+	}
+	else if (strcmp(parameter->name, "Spice") == 0) {
+		// TODO
+		printf("Warning: Skipping Spice parameter set\n");
+	}
+	else {
+		printf("Error: unknown parameter set name %s\n", parameter->name);
+		exit(EXIT_FAILURE);
+	}
+	free(str);
+
+	return;
+}
+
+
+
 void twix_load_protocol(Twix *twix, int scan, char *name) // TODO: keep string to print it if required? Also makes loading the raw protocol easier. Shouldn't take much memory
 {
 	FILE* f = twix->f;
@@ -112,8 +136,6 @@ void twix_load_protocol(Twix *twix, int scan, char *name) // TODO: keep string t
 
 	return;
 }
-
-
 
 char* twix_scanner_protocol(Twix* twix, int scan)
 {

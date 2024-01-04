@@ -93,7 +93,7 @@ int main(int argc, char* argv[])
 {
 	if (argc < 2) {
 		printf("Error: no filename given\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	Twix* twix = twix_open(argv[1]);

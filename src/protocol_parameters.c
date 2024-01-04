@@ -1,3 +1,23 @@
+struct Parameter
+{
+	char type[PARAMETER_TYPE_LEN];
+	char name[PARAMETER_NAME_LEN];
+	void *content;
+};
+
+struct ParameterList
+{
+	struct ParameterList* next;
+	struct ParameterList* prev;
+	Parameter p;
+};
+
+
+
+enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
+
+
+
 bool is_parameter_type(Parameter *p, char *type)
 {
 	check_pointer(p,    "is_parameter_type(%p, type)", p);
@@ -57,7 +77,7 @@ Parameter* index_parameter_array(Parameter *p, int i)
 	check_pointer(p, "index_parameter_array(NULL, i)");
 	if (strcmp(p->type, "ParamArray") != 0) {
 		printf("Error: not a ParamArray\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	Parameter *p_array = (Parameter *) p->content;
 	return index_parameter_map(p_array, i);
@@ -65,7 +85,6 @@ Parameter* index_parameter_array(Parameter *p, int i)
 
 
 
-// Debug parameter
 void print_parameter(Parameter *p)
 {
 	check_pointer(p, "print_parameter(NULL)");
@@ -79,6 +98,9 @@ void print_parameter(Parameter *p)
 		if (str == NULL) printf(" = \"\"");
 		else             printf(" = \"%s\"", str);
 	}
+	else if (is_parameter_type(p, "ParamFunctor") || is_parameter_type(p, "PipeService")) {
+		printf(" %s", ((Parameter *) p->content)->name);
+	}
 	printf("\n");
 
 	return;
@@ -86,7 +108,6 @@ void print_parameter(Parameter *p)
 
 
 
-// Parse parameter name, type and values from string
 char* parse_parameter_name_type(Parameter* p, char* start, char* stop)
 {
 	// Strip spaces
@@ -100,7 +121,7 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop)
 		start++;
 		if (*start == '\0') {
 			printf("Error: unexpected null byte read");
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		if (c == '.') {
 			p->type[i] = '\0';
@@ -111,7 +132,7 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop)
 	if (i == PARAMETER_TYPE_LEN) {
 		printf("Error: parameter type unexpectedly long:\n");
 		debug(p->type, PARAMETER_TYPE_LEN);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	// Get name
@@ -131,9 +152,8 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop)
 
 
 
-// container == map or array
 // returns false if parsing list is finished
-bool find_container_type(char** p_start, char** p_stop)
+bool find_container_types(char** p_start, char** p_stop) // container == map or array
 {
 	char* start = *p_start;
 	char* stop  = *p_stop;
@@ -183,8 +203,8 @@ bool find_container_type(char** p_start, char** p_stop)
 }
 
 
-// Required for building parameter arrays
-void copy_parameter_type(Parameter *dest, Parameter *src)
+
+void copy_parameter_type(Parameter *dest, Parameter *src) // Required for building parameter arrays
 {
 	strcpy(dest->name, src->name);
 	strcpy(dest->type, src->type);
@@ -290,7 +310,7 @@ void parse_bool_parameter(void** content, char* start, char* stop)
 	return;
 }
 
-void parse_parameter_content(); // Defined later because requires ParamArray and ParaMap functionality
+
 
 ParameterList* append_new_entry(ParameterList* list)
 {
@@ -299,6 +319,8 @@ ParameterList* append_new_entry(ParameterList* list)
 	list = list->next;
 	return list;
 }
+
+void parse_parameter_content(); // Defined later because requires ParamArray and ParaMap functionality
 
 void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode mode)
 {
@@ -323,7 +345,7 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 		// Parse parameter name and type in case of map, or copy type for array
 		if (mode & parse_type) {
 			// Name and type are to be determined (map, or array type determination)
-			if (!find_container_type(&start, &stop)) return;
+			if (!find_container_types(&start, &stop)) return;
 
 			list = append_new_entry(list);
 			current_p = &(list->p);
@@ -369,6 +391,111 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 	return;
 }
 
+void parse_parameter_array(Parameter *p, char *start, char *stop, enum parse_mode mode)
+{
+	// TODO: The below line is for cases where a { } is enough to signify an empty array/map instead of
+	// { {} {} ...}
+	if (strcmp(p->name, "RxCoilSelects") == 0 || strcmp(p->name, "aRxCoilSelectData") == 0) return;
+
+	// Parse the type signature
+	if (mode & parse_type) {
+		// TODO: this breaks if it isn't last in the list, seems to not happen?
+		char signature[] = "Default> ";
+		size_t signature_length = sizeof(signature)-1;
+		bool not_found = true;
+		while (start < stop) {
+			start = find('<', start, stop);
+			// TODO check for NULL
+			if (strncmp(start+1, signature, signature_length) == 0) {
+				not_found = false;
+				break;
+			}
+			start += sizeof(signature);
+		}
+		if (not_found) {
+			printf("Error: parameter array with unexpected signature\n");
+			exit(EXIT_FAILURE);
+		}
+		start += sizeof(signature);
+	}
+
+	// Find matching closing brace
+	char *type_opening_brace = find('{', start+1, stop);
+	char *type_closing_brace = find_matching(type_opening_brace, '}');
+
+	// Parsing type of ParamArray
+	if (mode & parse_type) {
+		// The elements of the ParamArray will be loaded into a ParamMap, which is set up here
+
+		// Create ParamMap with list in contents
+		Parameter *p_array = (Parameter*) calloc(1, sizeof(Parameter));
+		strcpy(p_array->type, "ParamMap");
+		p_array->name[0] = '\0'; // No name necessary
+		ParameterList *list = (ParameterList *) calloc(1, sizeof(ParameterList));
+		p_array->content = (void *) list;
+
+		p->content = (void *) p_array;
+
+		// Parse array type and put into the ParamMap list as the first element
+		Parameter* p_array_element = &(list->p);
+		start = parse_parameter_name_type(p_array_element, start, type_closing_brace);
+		parse_parameter_content(p_array_element, start, type_closing_brace, parse_type);
+	}
+
+	// Advance pointer to after the ParamArray type definition
+	// This is only the case for the parent ParamArray
+	if (mode & parse_type && mode & parse_content) start = type_closing_brace + 1;
+
+	// Parse the ParamArray contents but also need to copy type
+	// ParamArray inside a ParamArray?
+	if (mode & parse_content) parse_parameter_content((Parameter *)p->content, start, stop, parse_content | copy_type);
+
+	return;
+}
+
+void parse_parameter_functor(Parameter *p, char *start, char *stop, enum parse_mode mode)
+{
+	if (mode & parse_type) {
+
+		// Signature
+		start = find('<', start, stop) + 1;
+		char signature[] = "Class> ";
+		size_t signature_length = sizeof(signature)-1;
+		if (strncmp(start, signature, signature_length) != 0) {
+			printf("Error: functor with unexpected signature\n");
+			debug(start, sizeof(signature));
+		}
+		start += sizeof(signature)-1;
+
+		// Create ParamMap with list in contents
+		Parameter *p_functor = (Parameter*) calloc(1, sizeof(Parameter));
+		strcpy(p_functor->type, "ParamMap");
+		p->content = (void *) p_functor;
+
+		// Parse functor name
+		{
+			start = find('"', start, stop);
+			start += 1;
+			char *closing_quote = find('"', start, stop);
+			// TODO: check for null start and closing
+			size_t len = closing_quote-start;
+			if (len > PARAMETER_NAME_LEN) {
+				printf("Error: parameter name too long\n");
+				debug(start, len);
+				exit(EXIT_FAILURE);
+			}
+			memcpy(p_functor->name, start, len);
+			p_functor->name[len] = '\0';
+			start = closing_quote + 1;
+		}
+	}
+
+	// TODO: can a functor be in a ParamArray? Would this still work?
+	if (mode & parse_content) parse_parameter_list((Parameter *) p->content, start, stop, mode);
+
+	return;
+}
+
 
 
 // [start, stop] = "{...}"
@@ -397,119 +524,13 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 		stop -= 1;
 	}
 
-	if (strcmp(p->type, "ParamMap") == 0 || strcmp(p->type, "Pipe") == 0) {
-		parse_parameter_list(p, start, stop, mode);
-		#ifdef DEBUG_PARAMETERS
-		printf("%s %s\n", p->name, p->type);
-		#endif
-	}
-	else if (strcmp(p->type, "ParamArray") == 0) {
-		// TODO: The below line is for cases where a { } is enough to signify an empty array/map instead of { {} {} ...}
-		if (strcmp(p->name, "RxCoilSelects") == 0 || strcmp(p->name, "aRxCoilSelectData") == 0) return;
-
-		// Parse the type signature
-		if (mode & parse_type) {
-			// Find type signature
-			// TODO: this breaks if it isn't last in the list
-			char signature[] = "Default> ";
-			size_t signature_length = sizeof(signature)-1;
-			bool not_found = true;
-			while (start < stop) {
-				start = find('<', start, stop);
-				// TODO check for NULL
-				if (strncmp(start+1, signature, signature_length) == 0) {
-					not_found = false;
-					break;
-				}
-				start += sizeof(signature);
-			}
-			if (not_found) {
-				printf("Error: parameter array with unexpected signature\n");
-				exit(1);
-			}
-			start += sizeof(signature);
-		}
-
-		// Find matching closing brace
-		char *type_opening_brace = find('{', start+1, stop);
-		char *type_closing_brace = find_matching(type_opening_brace, '}');
-
-		// Parsing type of ParamArray
-		if (mode & parse_type) {
-			// The elements of the ParamArray will be loaded into a ParamMap, which is set up here
-
-			// Create ParamMap with list in contents
-			Parameter *p_array = (Parameter*) calloc(1, sizeof(Parameter));
-			strcpy(p_array->type, "ParamMap");
-			p_array->name[0] = '\0'; // No name necessary
-			ParameterList *list = (ParameterList *) calloc(1, sizeof(ParameterList));
-			p_array->content = (void *) list;
-
-			// Reference this parameter in contents of p
-			p->content = (void *) p_array;
-
-			// Parse array type and put into the ParamMap list
-			Parameter* p_array_element = &(list->p);
-			start = parse_parameter_name_type(p_array_element, start, type_closing_brace);
-			parse_parameter_content(p_array_element, start, type_closing_brace, parse_type);
-		}
-
-		// Advance pointer to after the ParamArray type definition
-		// This is only the case for the parent ParamArray
-		if (mode & parse_type && mode & parse_content) start = type_closing_brace + 1;
-
-		// Parse content
-		if (mode & parse_content) { // ParamArray inside a ParamArray
-			// Parse the ParamArray contents, but also need to copy type
-			parse_parameter_content((Parameter *)p->content, start, stop, parse_content | copy_type);
-		}
-		#ifdef DEBUG_PARAMETERS
-		printf("%s %s\n", p->name, p->type);
-		#endif
-	}
-	else if (strcmp(p->type, "ParamFunctor") == 0 || strcmp(p->type, "PipeService") == 0) {
-		if (mode & parse_type) {
-			// Check signature
-			start = find('<', start, stop) + 1;
-			char signature[] = "Class> ";
-			size_t signature_length = sizeof(signature)-1;
-			if (strncmp(start, signature, signature_length) != 0) {
-				printf("Error: functor with unexpected signature\n");
-				debug(start, sizeof(signature));
-			}
-			start += sizeof(signature)-1;
-
-			// Create ParamMap with list in contents
-			Parameter *p_functor = (Parameter*) calloc(1, sizeof(Parameter));
-			strcpy(p_functor->type, "ParamMap");
-			// Reference this parameter in contents of p
-			p->content = (void *) p_functor;
-
-			// Parse functor name
-			{
-				start = find('"', start, stop);
-				start += 1;
-				char *closing_quote = find('"', start, stop);
-				// TODO: check for null start and closing
-				size_t len = closing_quote-start;
-				if (len > PARAMETER_NAME_LEN) {
-					printf("Error: parameter name too long\n");
-					debug(start, len);
-					exit(1);
-				}
-				memcpy(p_functor->name, start, len);
-				p_functor->name[len] = '\0';
-				start = closing_quote + 1;
-			}
-		}
-
-		// TODO: can a functor be in a ParamArray?
-		if (mode & parse_content) parse_parameter_list((Parameter *) p->content, start, stop, mode);
-		#ifdef DEBUG_PARAMETERS
-		printf("%s %s %s\n", p->name, p->type, ((Parameter *) p->content)->name);
-		#endif
-	}
-	else if (mode & parse_content) { // Atomic parameters
+	if (is_parameter_type(p, "ParamMap"))          parse_parameter_list(p, start, stop, mode);
+	else if (is_parameter_type(p, "Pipe"))         parse_parameter_list(p, start, stop, mode);
+	else if (is_parameter_type(p, "ParamArray"))   parse_parameter_array(p, start, stop, mode);
+	else if (is_parameter_type(p, "ParamFunctor")) parse_parameter_functor(p, start, stop, mode);
+	else if (is_parameter_type(p, "PipeService"))  parse_parameter_functor(p, start, stop, mode);
+	else if (mode & parse_content) {
+		// Atomic parameters
 		if      (strcmp(p->type, "ParamString") == 0) parse_string_parameter(&(p->content), start, stop);
 		else if (strcmp(p->type, "ParamLong")   == 0) parse_long_parameter  (&(p->content), start, stop);
 		else if (strcmp(p->type, "ParamDouble") == 0) parse_double_parameter(&(p->content), start, stop);
@@ -519,11 +540,12 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 			// Throw error when finished with all types?
 			return;
 		}
-		#ifdef DEBUG_PARAMETERS
-		print_parameter(p);
-		#endif
 	}
 	// else: happens only if mode == parse_type and type is atomic
+
+	#ifdef DEBUG_PARAMETERS
+	print_parameter(p);
+	#endif
 
 	return;
 }
@@ -582,49 +604,13 @@ void parse_measyaps_protocol(Parameter* parameter, char* str, size_t len)
 	return;
 }
 
-// the top-most container of protocols i.e. Config, Meas, MeasYaps, ...
-void parse_protocol(Parameter *parameter)
-{
-	strcpy(parameter->type, "ParamSet");
-
-	char *str = parameter->content;
-	uint32_t len = *((uint32_t *)(str + sizeof(long)));
-	char *parameters_str = str + sizeof(long) + sizeof(uint32_t); // advance by filepos and length
-
-	if (strcmp(parameter->name, "Config") == 0)        parse_config_protocol(parameter, parameters_str, len);
-	else if (strcmp(parameter->name, "MeasYaps") == 0) parse_measyaps_protocol(parameter, parameters_str, len);
-	else if (strcmp(parameter->name, "Meas") == 0) {
-		// TODO: should be similar to "Config"
-		printf("Warning: Skipping Meas parameter set\n");
-	}
-	else if (strcmp(parameter->name, "Phoenix") == 0) {
-		// TODO
-		printf("Warning: Skipping Phoenix parameter set\n");
-	}
-	else if (strcmp(parameter->name, "Dicom") == 0) {
-		// TODO
-		printf("Warning: Skipping Dicom parameter set\n");
-	}
-	else if (strcmp(parameter->name, "Spice") == 0) {
-		// TODO
-		printf("Warning: Skipping Spice parameter set\n");
-	}
-	else {
-		printf("Error: unknown parameter set name %s\n", parameter->name);
-		exit(EXIT_FAILURE);
-	}
-	free(str);
-
-	return;
-}
 
 
-
-
-// Freeing parameters
 void free_parameter(Parameter* p)
 {
-	printf("To free: %s %s\n", p->name, p->type);
+	//#ifdef DEBUG_PARAMETERS
+	//printf("To free: %s %s\n", p->name, p->type);
+	//#endif
 	if (
 		is_parameter_type(p, "ParamBool")   ||
 		is_parameter_type(p, "ParamLong")   ||
