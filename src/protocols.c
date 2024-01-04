@@ -56,6 +56,8 @@ void read_protocol_header(FILE* f, Protocol* protocol)
 
 void read_protocol(FILE *f, Protocol *protocol, int index)
 {
+	check_bounds(index, protocol->num, "read_protocol(f, protocol, _index_)");
+
 	strcpy(protocol->parameters[index].type, "ReadParamSet");
 
 	char *protocol_info = (char *) protocol->parameters[index].content;
@@ -117,6 +119,8 @@ void parse_protocol(Parameter *parameter) // the top-most container of protocols
 
 void twix_load_protocol(Twix *twix, int scan, char *name) // TODO: keep string to print it if required? Also makes loading the raw protocol easier. Shouldn't take much memory
 {
+	check_bounds(scan, twix->file_header->num_scans, "twix_load_protocol(twix, _scan_)");
+
 	FILE* f = twix->f;
 	fseek(f, twix->file_header->entries[scan].offset, SEEK_SET);
 
@@ -139,6 +143,8 @@ void twix_load_protocol(Twix *twix, int scan, char *name) // TODO: keep string t
 
 char* twix_scanner_protocol(Twix* twix, int scan)
 {
+	check_bounds(scan, twix->file_header->num_scans, "twix_scanner_protocol(twix, _scan_)");
+
 	Protocol* protocol = twix->protocols + scan;
 	Parameter* parameters = protocol->parameters;
 	int p;

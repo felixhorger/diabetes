@@ -1,5 +1,3 @@
-// --- Check for NULL ---
-
 // TODO: use more
 void check_pointer(void *ptr, const char *fmt, ...)
 {
@@ -14,10 +12,14 @@ void check_pointer(void *ptr, const char *fmt, ...)
 	exit(1);
 }
 
+void check_bounds(int i, size_t n, char* msg)
+{
+	if (i > -1 && i < n) return;
+	printf("Error: out of bounds access [%d/%lu] in %s\n", i+1, n, msg);
+	exit(EXIT_FAILURE);
+	return;
+}
 
-// --- Safely working with files ---
-
-// Doesn't check f == NULL...
 void check_file(FILE *f)
 {
 	if (feof(f)) printf("Error: read EOF\n");
@@ -26,6 +28,8 @@ void check_file(FILE *f)
 
 	exit(1);
 }
+
+
 
 void safe_fread(FILE* f, void* ptr, size_t n)
 {
@@ -36,8 +40,6 @@ void safe_fread(FILE* f, void* ptr, size_t n)
 }
 
 
-
-// --- String parsing and debugging ---
 
 void debug(char *str, size_t s)
 {
