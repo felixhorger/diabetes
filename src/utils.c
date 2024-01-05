@@ -55,7 +55,7 @@ char* find(char c, char *start, char *stop)
 	if (start == NULL || stop == NULL) return NULL;
 
 	int incr = (start < stop) ? 1 : -1;
-	while ((size_t)(start) * incr <= (size_t)(stop) * incr && *start != '\0' && *start != c) start += incr;
+	while ((size_t)(start) * incr < (size_t)(stop) * incr && *start != '\0' && *start != c) start += incr;
 
 	if (stop == start || *start != c) return NULL;
 	else return start;
