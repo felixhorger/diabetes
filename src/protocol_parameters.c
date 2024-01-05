@@ -5,6 +5,7 @@ struct Parameter
 	void *content;
 };
 
+
 struct ParameterList
 {
 	struct ParameterList* next;
@@ -13,9 +14,7 @@ struct ParameterList
 };
 
 
-
 enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
-
 
 
 bool is_parameter_type(Parameter *p, char *type)
@@ -27,12 +26,12 @@ bool is_parameter_type(Parameter *p, char *type)
 }
 
 
-
 double get_double_parameter(Parameter *p)
 {
 	check_pointer(p, "get_double_parameter(NULL)");
 	return *((double *)&(p->content));
 }
+
 
 long get_long_parameter(Parameter *p)
 {
@@ -40,11 +39,13 @@ long get_long_parameter(Parameter *p)
 	return *((long *)&(p->content));
 }
 
+
 bool get_bool_parameter(Parameter *p)
 {
 	check_pointer(p, "get_bool_parameter(NULL)");
 	return *((bool *)&(p->content));
 }
+
 
 char *get_string_parameter(Parameter *p)
 {
@@ -52,6 +53,8 @@ char *get_string_parameter(Parameter *p)
 	return (char *) p->content;
 }
 
+
+// TODO: index by name for map
 Parameter* index_parameter_map(Parameter *p, int i) // TODO: this is crap, need more like an iterator?
 {
 	check_pointer(p, "index_parameter_map(NULL, i)");
@@ -76,6 +79,7 @@ Parameter* index_parameter_map(Parameter *p, int i) // TODO: this is crap, need 
 	return &(list->p);
 }
 
+
 Parameter* index_parameter_array(Parameter *p, int i)
 {
 	check_pointer(p, "index_parameter_array(NULL, i)");
@@ -86,7 +90,6 @@ Parameter* index_parameter_array(Parameter *p, int i)
 	Parameter *p_array = (Parameter *) p->content;
 	return index_parameter_map(p_array, i);
 }
-
 
 
 void print_parameter(Parameter *p)
@@ -109,7 +112,6 @@ void print_parameter(Parameter *p)
 
 	return;
 }
-
 
 
 char* parse_parameter_name_type(Parameter* p, char* start, char* stop)
@@ -153,7 +155,6 @@ char* parse_parameter_name_type(Parameter* p, char* start, char* stop)
 	}
 	return start + 2; // ">
 }
-
 
 
 // returns false if parsing list is finished
@@ -207,7 +208,6 @@ bool find_container_types(char** p_start, char** p_stop) // container == map or 
 }
 
 
-
 void copy_parameter_type(Parameter *dest, Parameter *src) // Required for building parameter arrays
 {
 	strcpy(dest->name, src->name);
@@ -243,7 +243,6 @@ void copy_parameter_type(Parameter *dest, Parameter *src) // Required for buildi
 }
 
 
-
 void parse_string_parameter(void** content, char* start, char* stop)
 {
 	char *str_start = find('"', start, stop);
@@ -262,6 +261,7 @@ void parse_string_parameter(void** content, char* start, char* stop)
 	return;
 }
 
+
 void parse_long_parameter(void** content, char* start, char* stop)
 {
 	start += strspn(start, " \n\r\t");
@@ -274,6 +274,7 @@ void parse_long_parameter(void** content, char* start, char* stop)
 	return;
 }
 
+
 void parse_double_parameter(void** content, char* start, char* stop)
 {
 	start += strspn(start, " \n\r\t");
@@ -285,6 +286,7 @@ void parse_double_parameter(void** content, char* start, char* stop)
 
 	return;
 }
+
 
 void parse_bool_parameter(void** content, char* start, char* stop)
 {
@@ -315,7 +317,6 @@ void parse_bool_parameter(void** content, char* start, char* stop)
 }
 
 
-
 ParameterList* append_new_entry(ParameterList* list)
 {
 	list->next = (ParameterList*) calloc(1, sizeof(ParameterList));
@@ -324,7 +325,9 @@ ParameterList* append_new_entry(ParameterList* list)
 	return list;
 }
 
+
 void parse_parameter_content(); // Defined later because requires ParamArray and ParaMap functionality
+
 
 void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode mode)
 {
@@ -395,12 +398,9 @@ void parse_parameter_list(Parameter *p, char *start, char *stop, enum parse_mode
 	return;
 }
 
+
 void parse_parameter_array(Parameter *p, char *start, char *stop, enum parse_mode mode)
 {
-	// TODO: The below line is for cases where a { } is enough to signify an empty array/map instead of
-	// { {} {} ...}
-	if (strcmp(p->name, "RxCoilSelects") == 0 || strcmp(p->name, "aRxCoilSelectData") == 0) return;
-
 	// Parse the type signature
 	if (mode & parse_type) {
 		// TODO: this breaks if it isn't last in the list, seems to not happen?
@@ -425,6 +425,13 @@ void parse_parameter_array(Parameter *p, char *start, char *stop, enum parse_mod
 
 	// Find matching closing brace
 	char *type_opening_brace = find('{', start+1, stop);
+	if (type_opening_brace == NULL) {
+		if (strcmp(p->name, "BCCombineMatrix") != 0) {
+			printf("Error: in all tested cases only BCCombineMatrix caused this exception, please check if something's wrong with parsing parameter arrays\n");
+			exit(EXIT_FAILURE);
+		}
+		return;
+	}
 	char *type_closing_brace = find_matching(type_opening_brace, '}');
 
 	// Parsing type of ParamArray
@@ -456,6 +463,7 @@ void parse_parameter_array(Parameter *p, char *start, char *stop, enum parse_mod
 
 	return;
 }
+
 
 void parse_parameter_functor(Parameter *p, char *start, char *stop, enum parse_mode mode)
 {
@@ -499,7 +507,6 @@ void parse_parameter_functor(Parameter *p, char *start, char *stop, enum parse_m
 
 	return;
 }
-
 
 
 // [start, stop] = "{...}"
@@ -555,6 +562,7 @@ void parse_parameter_content(Parameter* p, char* start, char* stop, enum parse_m
 	return;
 }
 
+
 void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 {
 	// Check initial signature
@@ -588,6 +596,7 @@ void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 
 	return;
 }
+
 
 void parse_meas_protocol(Parameter* parameter, char* str, size_t len)
 {
@@ -637,6 +646,7 @@ void parse_meas_protocol(Parameter* parameter, char* str, size_t len)
 	return;
 }
 
+
 void parse_measyaps_protocol(Parameter* parameter, char* str, size_t len)
 {
 	char signature[] = "### ASCCONV BEGIN ";
@@ -655,7 +665,6 @@ void parse_measyaps_protocol(Parameter* parameter, char* str, size_t len)
 	printf("Warning: Skipping MeasYaps parameter set (bogus %s)\n", stop);
 	return;
 }
-
 
 
 void free_parameter(Parameter* p)
