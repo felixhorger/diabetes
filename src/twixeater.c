@@ -105,7 +105,8 @@ int main(int argc, char* argv[])
 	twix_load_protocol(twix, 0, twix_config);
 	twix_load_protocol(twix, 0, twix_dicom);
 	twix_load_protocol(twix, 0, twix_meas);
-	int size[4];
+	twix_load_protocol(twix, 0, twix_measyaps);
+	int size[3];
 	twix_kspace_dims(twix, 0, size);
 	printf("kspace dims: %d %d %d\n", size[0], size[1], size[2]);
 	//twix_load_data(twix, 0);

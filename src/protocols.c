@@ -1,10 +1,3 @@
-#define min(a, b) (a) < (b) ? (a) : (b)
-#define PARAMETER_NAME_LEN 64
-#define PARAMETER_TYPE_LEN 16
-//#define DEBUG_PARAMETERS
-
-enum parameter_set {twix_config=0, twix_dicom=1, twix_meas=2, twix_measyaps=3, twix_phoenix=4, twix_spice=5};
-
 struct Protocol
 {
 	uint32_t length; // number of bytes of protocols (incl. header)
@@ -30,7 +23,7 @@ void read_protocol_header(FILE* f, Protocol* protocol)
 		strcpy(protocol->parameters[p].type, "NotLoaded");
 
 		char *name = (char*) &(protocol->parameters[p].name);
-		for (int j = 0; j < 48; j++) {
+		for (int j = 0; j < PARAMETER_NAME_LEN; j++) {
 			char c = fgetc(f);
 			check_file(f);
 			name[j] = c;
