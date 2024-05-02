@@ -216,7 +216,7 @@ ScanData read_data(FILE *f, size_t num_bytes)
 		if (scan_data.index == SCANDATABLOCKLEN) {
 			scan_data.index = 0;
 			scan_data.block += 1;
-			// TODO: once servers are updated use this instead of realloc...
+			// TODO: remove realloc and use Philipp's buffer blocks
 			//scan_data.hdrs = (ReadoutHeader ***)reallocarray(
 			//	scan_data.hdrs,
 			//	scan_data.block+1,
