@@ -6,10 +6,25 @@ struct Protocol
 	int sets[6]; // is set to -1 if not parsed
 };
 
+#define min(a, b) (a) < (b) ? (a) : (b)
+#define PARAMETER_NAME_LEN 64
+#define PARAMETER_TYPE_LEN 16
+//#define DEBUG_PARAMETERS
 
+enum parse_mode {parse_type = 1, parse_content = 2, copy_type = 4};
 
-#include "protocol_parameters.c"
+struct Parameter
+{
+	char type[PARAMETER_TYPE_LEN];
+	char name[PARAMETER_NAME_LEN];
+	void *content;
+};
 
+#include "parse_measyaps.c" // TODO: need to get rid of dependence on struct Parameter globally in twixeater
+#include "parse_config_dicom_meas_protocols.c"
+
+// Assumes that the order is predefined
+enum parameter_set {twix_config=0, twix_dicom=1, twix_meas=2, twix_measyaps=3, twix_phoenix=4, twix_spice=5};
 
 
 void read_protocol_header(FILE* f, Protocol* protocol)
@@ -77,10 +92,10 @@ void read_protocol(FILE *f, Protocol *protocol, int index)
 void parse_protocol(Protocol *protocol, int index) // the top-most container of protocols i.e. Config, Meas, MeasYaps, ...
 {
 	
-	// TODO: is order consistent?
+	// TODO: is order consistent? it is assumed here
 	char *name = protocol->parameters[index].name;
 	if      (strcmp(name, "Config")   == 0) protocol->sets[index] = 0;
-	else if (strcmp(name, "Dicom")    == 0) protocol->sets[index] = 1;
+	else if (strcmp(name, "Dicom")    == 0) protocol->sets[index] = 1; // these could be anything, just not -1
 	else if (strcmp(name, "Meas")     == 0) protocol->sets[index] = 2;
 	else if (strcmp(name, "MeasYaps") == 0) protocol->sets[index] = 3;
 	else if (strcmp(name, "Phoenix")  == 0) protocol->sets[index] = 4;

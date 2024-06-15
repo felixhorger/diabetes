@@ -102,16 +102,39 @@ int main(int argc, char* argv[])
 
 	Twix* twix = twix_open(argv[1]);
 	twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
-	twix_close(twix);
-	return 0;
 	twix_load_protocol(twix, 0, twix_config);
+	twix_load_protocol(twix, 0, twix_measyaps);
+
+	//printf("%s\n",
+	//	(char *)*measyaps_entry(
+	//		(Dictionary *) twix->protocols->parameters[3].content,
+	//			"tSequenceFileName",
+	//			NULL,
+	//			DICT_SEARCH
+	//	)+1
+	//);
+
+
+	//printf("%s\n",
+	//	(char *)((*measyaps_entry(
+	//		(Dictionary *) ((*measyaps_entry(
+	//			(Dictionary *) twix->protocols->parameters[3].content,
+	//				"sProtConsistencyInfo",
+	//				NULL,
+	//				DICT_SEARCH
+	//		))+1),
+	//		"flGMax",
+	//		NULL,
+	//		DICT_SEARCH
+	//	))+1) // NOTE: the +1 is important! all str entries are indicated with a zero, all subdicts by 1 (one byte)
+	//);
+
 	twix_load_protocol(twix, 0, twix_dicom);
 	twix_load_protocol(twix, 0, twix_meas);
-	twix_load_protocol(twix, 0, twix_measyaps);
 	int size[3];
 	twix_kspace_dims(twix, 0, size);
 	printf("kspace dims: %d %d %d\n", size[0], size[1], size[2]);
-	//twix_load_data(twix, 0);
+	twix_load_data(twix, 0);
 	twix_close(twix);
 
 	return 0;
