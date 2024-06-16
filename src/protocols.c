@@ -192,8 +192,31 @@ void twix_save_scanner_protocol(Twix* twix, int scan, char* filename)
 }
 
 
+int twix_receive_channels(Twix *twix, int scan)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_receive_channels(twix, _scan_, size)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_measyaps] == -1) {
+		printf("Error: MeasYAPS protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Dictionary *dict; 
+	dict = (Dictionary *) twix->protocols->parameters[3].content;
+	dict = get_measyaps_subdict(dict, "sCoilSelectMeas");
+	dict = get_measyaps_subdict(dict, "aRxCoilSelectData[0]");
+	dict = get_measyaps_subdict(dict, "asList");
+	dict = get_measyaps_subdict(dict, "__attribute__");
+	char *num_channels = get_measyaps_entry(dict, "size");
+
+	return strtol(num_channels, NULL, 10);
+}
+
+
 // size[3]
-void twix_kspace_dims(Twix *twix, int scan, int *size)
+void twix_kspace_size(Twix *twix, int scan, int *size)
 {
 	check_bounds(scan, twix->file_header->num_scans, "twix_kspace_dims(twix, _scan_, size)");
 
@@ -205,45 +228,327 @@ void twix_kspace_dims(Twix *twix, int scan, int *size)
 	}
 
 	Parameter *p, *p_col, *p_lin, *p_par;
-	p = protocol->parameters + twix_meas; // ParamSet
-	p = index_parameter_map((Parameter *)p->content, 4); // ParamMap MEAS
-	p = index_parameter_map(p, 38); // ParamMap sKSpace
-	p_col = index_parameter_map(p, 0);
-	p_lin = index_parameter_map(p, 1);
-	p_par = index_parameter_map(p, 5);
+	// TODO: the below two lines are the same for every access of meas protocol? Put in function
+	p = protocol->parameters + twix_meas; // ParamSet Config
+	p = find_in_parameter_map((Parameter *)p->content, "MEAS"); // ParamMap MEAS
+	p = find_in_parameter_map(p, "sKSpace"); // ParamMap sKSpace
+	p_col = find_in_parameter_map(p, "lBaseResolution");
+	p_lin = find_in_parameter_map(p, "lPhaseEncodingLines");
+	p_par = find_in_parameter_map(p, "lPartitions");
 
-	size[0] = (long) p_col->content;
-	size[0] *= 2;
-	size[1] = (long) p_lin->content;
-	size[2] = (long) p_par->content;
+	if (p_col == NULL || p_lin == NULL || p_par == NULL) {
+		printf("Error: could not find k-space dimensions in Config protocol");
+		exit(EXIT_FAILURE);
+	}
+
+	size[0] = 2 * get_long_parameter(p_col);
+	size[1] = get_long_parameter(p_lin);
+	size[2] = get_long_parameter(p_par);
 
 	return;
 }
 
-//void twix_kspace_dims(Twix *twix, int scan, int *size)
-//{
-//	check_bounds(scan, twix->file_header->num_scans, "twix_kspace_dims(twix, _scan_)");
-//
-//	size[0] = twix_obj["NCol"])
-//
-//	# Read other dimensions
-//	#=
-//		Would be too easy if one could use
-//
-//		num_lines	= convert(Int, twix_obj["NLin"])
-//		num_partitions	= convert(Int, twix_obj["NPar"])
-//		num_channels	= convert(Int, twix_obj["NCha"])
-//
-//		but it happens that this doesn't match with the FOV that was selected, i.e.
-//		this gives you the sampled k-space size, not necessarily matching the reconstructed one.
-//	=#
-//	bogus = twix["hdr"]["Meas"]
-//	num_lines	= convert(Int, bogus["lPhaseEncodingLines"])
-//	num_partitions	= convert(Int, bogus["lPartitions"])
-//	num_channels	= convert(Int, twix_obj["NCha"])
-//	return num_columns, num_lines, num_partitions, num_channels
-//	end
-//	size(raw::SiemensRawData, name::Symbol; key::String="image") = convert(Int, raw.data[key]["N" * String(name)])
-//	return;
-//}
+// accel[2]
+void twix_acceleration_factors(Twix *twix, int scan, int *accel)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_kspace_dims(twix, _scan_, size)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_meas] == -1) {
+		printf("Error: Meas protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Parameter *p, *p_lin, *p_par;
+	p = protocol->parameters + twix_meas; // ParamSet Config
+	p = find_in_parameter_map((Parameter *)p->content, "MEAS"); // ParamMap MEAS
+	p = find_in_parameter_map(p, "sPat");
+	p_lin = find_in_parameter_map(p, "lAccelFactPE");
+	p_par = find_in_parameter_map(p, "lAccelFact3D");
+
+	accel[0] = get_long_parameter(p_lin);
+	accel[1] = get_long_parameter(p_par);
+
+	return;
+}
+
+void twix_ref_dims(Twix *twix, int scan, int *size)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_ref_size(twix, _scan_, size)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_meas] == -1) {
+		printf("Error: Meas protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Parameter *p, *p_lin, *p_par;
+	p = protocol->parameters + twix_meas; // ParamSet Config
+	p = find_in_parameter_map((Parameter *)p->content, "MEAS"); // ParamMap MEAS
+	p = find_in_parameter_map(p, "sPat");
+	p_lin = find_in_parameter_map(p, "lRefLinesPE");
+	p_par = find_in_parameter_map(p, "lRefLines3D");
+
+	size[0] = get_long_parameter(p_lin);
+	size[1] = get_long_parameter(p_par);
+
+	return;
+}
+
+
+// in degrees
+double twix_flip_angle(Twix *twix, int scan, int i)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_flip_angle(twix, _scan_, i)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_measyaps] == -1) {
+		printf("Error: MeasYAPS protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Dictionary *dict; 
+	dict = (Dictionary *) twix->protocols->parameters[3].content;
+
+	char key[17+2+2+1]; // adFlipAngleDegree, [], index can be max 2 digits, null byte
+	sprintf(key, "adFlipAngleDegree[%d]", i);
+	char *fa = get_measyaps_entry(dict, key);
+
+	return strtod(fa, NULL);
+}
+
+// in ms
+double twix_echo_time(Twix *twix, int scan, int i)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_echo_time(twix, _scan_, i)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_measyaps] == -1) {
+		printf("Error: MeasYAPS protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Dictionary *dict; 
+	dict = (Dictionary *) twix->protocols->parameters[3].content;
+
+	char key[4+2+3+1]; // alTE, [], index can be max 3 digits, null byte
+	sprintf(key, "alTE[%d]", i);
+	char *te = get_measyaps_entry(dict, key);
+
+	return 0.001 * strtol(te, NULL, 10);
+}
+
+// TODO: boilerplate, how to improve?
+// in ms
+double twix_repetition_time(Twix *twix, int scan, int i)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_repetition_time(twix, _scan_, i)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_measyaps] == -1) {
+		printf("Error: MeasYAPS protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Dictionary *dict; 
+	dict = (Dictionary *) twix->protocols->parameters[3].content;
+
+	char key[4+2+3+1]; // alTR, [], index can be max 3 digits, null byte
+	sprintf(key, "alTR[%d]", i);
+	char *tr = get_measyaps_entry(dict, key);
+
+	return 0.001 * strtol(tr, NULL, 10);
+}
+
+
+// in mus
+double twix_dwell_time(Twix *twix, int scan)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_dwell_time(twix, _scan_)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_meas] == -1) {
+		printf("Error: Meas protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Parameter *p;
+	p = protocol->parameters + twix_meas; // ParamSet Meas
+	p = find_in_parameter_map((Parameter *)p->content, "MEAS"); // ParamMap MEAS
+	p = find_in_parameter_map(p, "sRXSPEC");
+	p = find_in_parameter_map(p, "alDwellTime");
+	// TODO: dwell time is labeled as ParamLong, but is multiple values fffffffff
+
+	return 0.001 * get_long_parameter(p);
+}
+
+
+
+// orientation = [normal_x, normal_y, normal_z, rotation angle]
+// fov[3], shift[3]
+void twix_coordinates(Twix *twix, int scan, double *orientation, double *shift, double *fov)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_coordinates(twix, _scan_, orientation, shift, fov)");
+	// TODO all this also boilerplate, outsource
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_measyaps] == -1) {
+		printf("Error: MeasYAPS protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Dictionary *dict;
+	dict = (Dictionary *) twix->protocols->parameters[3].content;
+	dict = get_measyaps_subdict(dict, "sSliceArray");
+	dict = get_measyaps_subdict(dict, "asSlice[0]");
+
+	fov[0] = strtod(get_measyaps_entry(dict, "dReadoutFOV"), NULL);
+	fov[1] = strtod(get_measyaps_entry(dict, "dPhaseFOV"),   NULL);
+	fov[2] = 2.0 * strtod(get_measyaps_entry(dict, "dThickness"),  NULL);
+
+	Dictionary *subdict;
+	char *entry;
+	memset(orientation, 0, 4 * sizeof(double));
+	memset(shift, 0, 3 * sizeof(double));
+
+	subdict = get_measyaps_subdict(dict, "sNormal");
+	entry = get_measyaps_entry(subdict, "dSag");
+	if (entry != NULL) orientation[0] = strtod(entry, NULL);
+	entry = get_measyaps_entry(subdict, "dCor");
+	if (entry != NULL) orientation[1] = strtod(entry, NULL);
+	entry = get_measyaps_entry(subdict, "dTra");
+	if (entry != NULL) orientation[2] = strtod(entry, NULL);
+	entry = get_measyaps_entry(subdict, "dInPlaneRot");
+	if (entry != NULL) orientation[3] = strtod(entry, NULL);
+
+	subdict = get_measyaps_subdict(dict, "sPosition");
+	entry = get_measyaps_entry(subdict, "dSag");
+	if (entry != NULL) shift[0] = strtod(entry, NULL);
+	entry = get_measyaps_entry(subdict, "dCor");
+	if (entry != NULL) shift[1] = strtod(entry, NULL);
+	entry = get_measyaps_entry(subdict, "dTra");
+	if (entry != NULL) shift[2] = strtod(entry, NULL);
+
+	return;
+}
+
+
+// pos[4] three chars plus null byte
+void twix_patient_position(Twix *twix, int scan, char *pos)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_patient_position(twix, _scan_, pos)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_config] == -1) {
+		printf("Error: Config protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Parameter *p;
+	p = protocol->parameters + twix_config; // ParamSet Config
+	p = (Parameter *)p->content; // ParamMap
+	p = find_in_parameter_map(p, "PARC"); // ParamMap
+	p = find_in_parameter_map(p, "PIPE"); // ParamMap
+	p = find_in_parameter_map(p, "acquisition"); // PipeService (behaves like ParamFunctor)
+	p = (Parameter *)p->content; // ParamMap
+	p = find_in_parameter_map(p, "FeedbackRoot"); // ParamFunctor
+	p = (Parameter *)p->content; // ParamMap
+	p = find_in_parameter_map(p, "PatientPosition"); // ParamFunctor
+	// TODO: simple from other protocols?
+
+	strcpy(pos, get_string_parameter(p));
+
+	return;
+}
+
+// 0 = male, 1 = female, 3 = other (I think)
+long twix_patient_sex(Twix *twix, int scan)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_patient_position(twix, _scan_, pos)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_config] == -1) {
+		printf("Error: Config protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Parameter *p;
+	p = protocol->parameters + twix_config; // ParamSet Config
+	p = (Parameter *)p->content; // ParamMap
+	p = find_in_parameter_map(p, "PARC"); // ParamMap
+	p = find_in_parameter_map(p, "RECOMPOSE"); // ParamMap
+	p = find_in_parameter_map(p, "PatientSex");
+
+	return get_long_parameter(p);
+}
+
+
+double twix_ref_voltage(Twix *twix, int scan)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_ref_voltage(twix, _scan_)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_meas] == -1) {
+		printf("Error: Meas protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Parameter *p;
+	p = protocol->parameters + twix_meas; // ParamSet Meas
+	p = find_in_parameter_map((Parameter *)p->content, "MEAS"); // ParamMap MEAS
+	p = find_in_parameter_map(p, "sTXSPEC");
+	p = find_in_parameter_map(p, "asNucleusInfo");
+	p = index_parameter_array(p, 0);
+	p = find_in_parameter_map(p, "flReferenceAmplitude");
+
+	return get_double_parameter(p);
+}
+
+// param should point to 8 bytes
+void twix_wip_param(Twix *twix, int scan, void *param, int i)
+{
+	check_bounds(scan, twix->file_header->num_scans, "twix_wip_params(twix, _scan_, param, i)");
+
+	Protocol* protocol = twix->protocols + scan;
+
+	if (protocol->sets[twix_measyaps] == -1) {
+		printf("Error: MeasYAPS protocol not loaded for scan %d\n", scan);
+		exit(EXIT_FAILURE);
+	}
+
+	Dictionary *dict;
+	dict = (Dictionary *) twix->protocols->parameters[3].content;
+	dict = get_measyaps_subdict(dict, "sWipMemBlock");
+
+	char *entry;
+	char key[sizeof("alFree[00]")];
+
+	// Check if it's in the long array
+	sprintf(key, "alFree[%d]", i);
+	entry = get_measyaps_entry(dict, key);
+	if (entry != NULL) {
+		*(long *)param = strtol(entry, NULL, 10);
+		return;
+	}
+
+	sprintf(key, "adFree[%d]", i);
+	entry = get_measyaps_entry(dict, key);
+	if (entry == NULL) {
+		printf("Error: WIP parameter at index %d not set\n", i);
+		exit(EXIT_FAILURE);
+	}
+	*(double *)param = strtod(entry, NULL);
+
+	return;
+}
 

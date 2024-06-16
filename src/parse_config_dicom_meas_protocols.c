@@ -1,14 +1,14 @@
 /* TODO:
 Currently everything is loaded into a datastructure connected with pointers.
-To make this more efficient, use my bmalloc package
 
+This is not the best in terms of storage/speed.
+It allows to easily change data potentially for later writing the data? Is there any usecase for that?
+
+Otherwise this could be better:
 A parameter will be stored as two null-terminated strings (type & name),
 followed by a number indicating how many bytes the parameter content uses.
-
 Arrays and maps can be implemented by having a number indicating the number of elements,
 and then pairs of number (how many bytes this element uses) and element itself.
-
-Traversing of such a structure will be a lot harder to implement, worth it?
 
 */
 
@@ -61,7 +61,7 @@ char *get_string_parameter(Parameter *p)
 Parameter* index_parameter_map(Parameter *p, int i) // TODO: this is crap, need more like an iterator?
 {
 	check_pointer(p, "index_parameter_map(NULL, i)");
-	if (!is_parameter_type(p, "ParamMap")) {
+	if (!is_parameter_type(p, "ParamMap") && !is_parameter_type(p, "Pipe")) {
 		printf("Error: not a ParamMap\n");
 		exit(EXIT_FAILURE);
 	}
@@ -92,6 +92,25 @@ Parameter* index_parameter_array(Parameter *p, int i)
 	}
 	Parameter *p_array = (Parameter *) p->content;
 	return index_parameter_map(p_array, i);
+}
+
+
+Parameter* find_parameter(ParameterList *list, char *name)
+{
+	while (list != NULL && strcmp(list->p.name, name) != 0) list = list->next;
+	if (list == NULL) return NULL;
+	return &(list->p);
+}
+
+Parameter* find_in_parameter_map(Parameter *p, char *name)
+{
+	check_pointer(p, "find_in_parameter_map(NULL, name)");
+	if (strcmp(p->type, "ParamMap") != 0 && !is_parameter_type(p, "Pipe")) {
+		printf("Error: not a ParamMap\n");
+		exit(EXIT_FAILURE);
+	}
+
+	return find_parameter((ParameterList *)p->content, name);
 }
 
 
@@ -267,7 +286,7 @@ void parse_string_parameter(void** content, char* start, char* stop)
 
 void parse_long_parameter(void** content, char* start, char* stop)
 {
-	start += strspn(start, " \n\r\t");
+	start += strspn(start, " \n\r\t<Default>");
 	stop = start + strspn(start, "-0123456789");
 	if (start == stop) return;
 
@@ -626,6 +645,8 @@ void free_parameter(Parameter* p)
 
 void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 {
+	// TODO: what happens if this is called twice?
+	// TODO: add comment this can also do dicom
 	// Check initial signature
 	char signature[] = "<XProtocol>";
 	size_t signature_length = sizeof(signature)-1;
@@ -661,6 +682,7 @@ void parse_config_protocol(Parameter* parameter, char* str, size_t len)
 
 void parse_meas_protocol(Parameter* parameter, char* str, size_t len)
 {
+	// TODO: what happens if this is called twice?
 	// TODO: overlap with config protocol, outsource
 	char signature[] = "<XProtocol>";
 	size_t signature_length = sizeof(signature)-1;
@@ -706,5 +728,4 @@ void parse_meas_protocol(Parameter* parameter, char* str, size_t len)
 	// Rest in Meas is ignored since could find anything useful in there
 	return;
 }
-
 

@@ -1,7 +1,7 @@
 
 #include "dataflags.c"
-#define SCANDATABLOCKLEN 128 // How many readout headers are in one block in ScanData
-#define DEBUG_READOUT
+#define MEMBLOCKSIZE (256 * sizeof(ReadoutHeader *)) // how many bytes to allocate at once when increasing the size of the structure holding pointers to readout headers
+//#define DEBUG_READOUT
 		
 // TODO:
 // Apparently there is another readout registered at the end, no idea what syncdata is (in between meas?)
@@ -13,9 +13,9 @@
 
 struct ScanData
 {
-	ReadoutHeader ***hdrs;
-	int32_t block;
-	int32_t index;
+	char *buffer; // data read from file
+	ReadoutHeader **hdrs; // pointers to readout headers
+	size_t n;
 };
 
 struct ReadoutHeader
@@ -187,14 +187,6 @@ void print_readout_header(ReadoutHeader *hdr)
 }
 
 
-void free_scan_data(ScanData scan_data)
-{
-	for (int b = 0; b < scan_data.block; b++) free(scan_data.hdrs[b]);
-	free(scan_data.hdrs);
-	return;
-}
-
-
 // TODO: how to use num_bytes to only read a certain number of readouts? How is e.g. a measurement/average indicated?
 // Could say read n readouts, skipping the sync and other special ones
 ScanData read_data(FILE *f, size_t num_bytes)
@@ -202,58 +194,39 @@ ScanData read_data(FILE *f, size_t num_bytes)
 	// Read in scan data
 	char *scan_buffer = (char *)malloc(num_bytes);
 	safe_fread(f, scan_buffer, num_bytes); // TODO: this can be problematic, since it reads all into memory, use case for when this is bad?
-	// Parse scan data
+
+	// Set up structure holding the parsed data
 	ScanData scan_data;
-	scan_data.block = -1;
-	scan_data.index = SCANDATABLOCKLEN;
-	scan_data.hdrs = NULL;
+	scan_data.buffer = scan_buffer;
+	scan_data.hdrs = (ReadoutHeader **)lmalloc(1, MEMBLOCKSIZE); // TODO: maybe incorporate the code from lmalloc here to make it more efficient
+	scan_data.n = 0;
+
+	// Parse scan data
 	char *pos = scan_buffer;
 	if (num_bytes < sizeof(ReadoutHeader)) {
 		free(scan_buffer);
 		return scan_data;
 	}
 	while (pos < scan_buffer + num_bytes) {
-		if (scan_data.index == SCANDATABLOCKLEN) {
-			scan_data.index = 0;
-			scan_data.block += 1;
-			// TODO: remove realloc and use Philipp's buffer blocks
-			//scan_data.hdrs = (ReadoutHeader ***)reallocarray(
-			//	scan_data.hdrs,
-			//	scan_data.block+1,
-			//	sizeof(ReadoutHeader**)
-			//);
-			scan_data.hdrs = (ReadoutHeader ***)realloc(
-				scan_data.hdrs,
-				(scan_data.block+1) * sizeof(ReadoutHeader**)
-			);
-			scan_data.hdrs[scan_data.block] = (ReadoutHeader **)malloc(
-				sizeof(ReadoutHeader*) * SCANDATABLOCKLEN
-			);
-		}
+		int n = scan_data.n;
+		scan_data.n += 1;
+		scan_data.hdrs = (ReadoutHeader **)lrealloc(
+			scan_data.hdrs,
+			scan_data.n * sizeof(ReadoutHeader *)
+		);
 		ReadoutHeader *readout_hdr = (ReadoutHeader *)pos;
 		#ifdef DEBUG_READOUT
 		print_readout_header(readout_hdr);
 		#endif
-		scan_data.hdrs[scan_data.block][scan_data.index] = readout_hdr;
-		scan_data.index += 1;
+		lset(scan_data.hdrs, n, readout_hdr);
 		pos += get_readout_num_bytes(readout_hdr);
 	}
 	if (pos != scan_buffer + num_bytes) {
-		free_scan_data(scan_data);
+		// TODO: Error?
+		lfree(scan_data.hdrs);
 		free(scan_buffer);
 		return scan_data;
 	}
-	// TODO: see comment above
-	//scan_data.hdrs[scan_data.block] = (ReadoutHeader **)reallocarray(
-	//	scan_data.hdrs[scan_data.block],
-	//	scan_data.index,
-	//	sizeof(ReadoutHeader*)
-	//);
-	scan_data.hdrs[scan_data.block] = (ReadoutHeader **)realloc(
-		scan_data.hdrs[scan_data.block],
-		scan_data.index * sizeof(ReadoutHeader*)
-	);
-
 	// Note: eof is not reached yet, residual bytes are just zeros I think, why?
 	return scan_data;
 }

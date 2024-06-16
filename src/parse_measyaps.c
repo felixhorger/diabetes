@@ -7,7 +7,6 @@ struct Dictionary
 	size_t valsalloc;
 	char *keys; // TODO: this could be bmalloc array?
 	void **vals; // TODO: this could also be like keys? Problem is if element is changed a different space required
-	// TODO: need to find a better solution to the type-indicator byte, maybe separate array in here?
 };
 
 #define DICT_SEARCH (0)
@@ -27,7 +26,6 @@ void ** measyaps_entry(Dictionary *dict, char *key, void *value, int mode)
 
 	char *dictkeys = dict->keys;
 	int i = 0;
-
 	while (i < dict->n) {
 		bool found = true;
 		char *k = key;
@@ -76,6 +74,39 @@ void ** measyaps_entry(Dictionary *dict, char *key, void *value, int mode)
 	//printf("create %s %p %d\n", key, dict->vals, i);
 
 	return dict->vals + i;
+}
+
+
+
+char * get_measyaps_entry(Dictionary *dict, char *key)
+{
+	void *p = measyaps_entry(dict, key, NULL, DICT_SEARCH);
+	if (p == NULL) return NULL;
+	p = *(void **)p;
+
+	// Is a normal entry?
+	if (*(char *)p != 0) {
+		printf("Error: Not MeasYAPS entry but subdict\n");
+		exit(EXIT_FAILURE);
+	}
+
+	return p + 1;
+}
+
+// TODO: could make this using varargs, to go as deep as necessary
+Dictionary * get_measyaps_subdict(Dictionary *dict, char *key)
+{
+	void *p = measyaps_entry(dict, key, NULL, DICT_SEARCH);
+	if (p == NULL) return NULL;
+	p = *(void **)p;
+
+	// Is a subdict entry?
+	if (*(char *)p != 1) {
+		printf("Error: Not MeasYAPS subdict but normal entry\n");
+		exit(EXIT_FAILURE);
+	}
+
+	return p + 1;
 }
 
 void parse_measyaps_line(Dictionary *dict, char *start, char *equalsign, char *eol)

@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include "utils.c"
+#include "../../bmalloc/include/bmalloc.h"
 
 typedef struct FileHeader FileHeader; // first to be read in
 typedef struct ScanHeader ScanHeader; // one for e.g. reference scan, actual scan, ...
@@ -19,7 +20,7 @@ typedef struct Twix Twix;
 struct Twix
 {
 	FILE* f;
-	FileHeader *file_header;
+	FileHeader *file_header; // TODO: Why are these all pointers? at least for FileHeader and ScanData could have it in here directly
 	Protocol *protocols;
 	ScanData *data;
 };
@@ -40,6 +41,7 @@ better functions for protocols
 twix_get_TE(twix);
 kspace = twix_get_kspace(twix); // reads in all the data, in which form? Check for the special ones not containing data.
 ? kspace = twix_filter_kspace(twix, filter_func()); // could also filter, filter_func can return 0 for ok, 1 for no, 2 for stop reading. What happens with the pointer structure then, being finished "half way"?
+search protocol functions
 */
 
 
@@ -82,7 +84,11 @@ void twix_close(Twix* twix)
 	free(twix->protocols);
 
 	// TODO: needs freeing of all substructures
-	free(twix->data);
+	if (twix->data != NULL) {
+		free(twix->data->buffer);
+		lfree(twix->data->hdrs);
+		free(twix->data);
+	}
 
 	free(twix->file_header);
 	fclose(twix->f);
@@ -103,38 +109,58 @@ int main(int argc, char* argv[])
 	Twix* twix = twix_open(argv[1]);
 	twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
 	twix_load_protocol(twix, 0, twix_config);
+	twix_load_protocol(twix, 0, twix_meas);
+	twix_load_protocol(twix, 0, twix_dicom);
 	twix_load_protocol(twix, 0, twix_measyaps);
 
-	//printf("%s\n",
-	//	(char *)*measyaps_entry(
-	//		(Dictionary *) twix->protocols->parameters[3].content,
-	//			"tSequenceFileName",
-	//			NULL,
-	//			DICT_SEARCH
-	//	)+1
-	//);
+	printf("Number of Rx channels %d\n", twix_receive_channels(twix, 0));
 
-
-	//printf("%s\n",
-	//	(char *)((*measyaps_entry(
-	//		(Dictionary *) ((*measyaps_entry(
-	//			(Dictionary *) twix->protocols->parameters[3].content,
-	//				"sProtConsistencyInfo",
-	//				NULL,
-	//				DICT_SEARCH
-	//		))+1),
-	//		"flGMax",
-	//		NULL,
-	//		DICT_SEARCH
-	//	))+1) // NOTE: the +1 is important! all str entries are indicated with a zero, all subdicts by 1 (one byte)
-	//);
-
-	twix_load_protocol(twix, 0, twix_dicom);
-	twix_load_protocol(twix, 0, twix_meas);
 	int size[3];
-	twix_kspace_dims(twix, 0, size);
-	printf("kspace dims: %d %d %d\n", size[0], size[1], size[2]);
+	twix_kspace_size(twix, 0, size);
+	printf("kspace size: %d %d %d\n", size[0], size[1], size[2]);
+
+	int accel[2];
+	twix_acceleration_factors(twix, 0, accel);
+	printf("acceleration: %d %d\n", accel[0], accel[1]);
+
+	printf("flip angle %fdeg\n", twix_flip_angle(twix, 0, 0));
+	printf("echo time %fms\n", twix_echo_time(twix, 0, 0));
+	printf("repetition time %fms\n", twix_repetition_time(twix, 0, 0));
+	printf("dwell time %fmus\n", twix_dwell_time(twix, 0));
+
+	twix_ref_dims(twix, 0, size);
+	printf("ref size: %d %d \n", size[0], size[1]);
+
+	double orientation[4], shift[3], fov[3];
+	twix_coordinates(twix, 0, orientation, shift, fov);
+	printf(
+		"Normal: (%f, %f, %f)\nIn-plane rotation: %fdeg\nShift: (%f, %f, %f)mm\nField of view: (%f, %f, %f)mm\n",
+		orientation[0], orientation[1], orientation[2],
+		orientation[3],
+		shift[0], shift[1], shift[2],
+		fov[0], fov[1], fov[2]
+	);
+
+
+	char pos[4];
+	twix_patient_position(twix, 0, pos);
+	printf("Patient position %s\n", pos);
+
+	printf("Patient sex %ld\n", twix_patient_sex(twix, 0));
+
+	double doubleparam;
+	long longparam;
+	twix_wip_param(twix, 0, &doubleparam, 2);
+	twix_wip_param(twix, 0, &longparam, 10);
+	printf("WIP Param at index 2 (long) %ld, at index 10 (double) %f\n", longparam, doubleparam);
+
+	printf("Reference voltage %fV\n", twix_ref_voltage(twix, 0));
+
 	twix_load_data(twix, 0);
+	printf("Number of readouts %ld\n", twix->data->n);
+	print_readout_header(lget(twix->data->hdrs, 10));
+	print_readout_header(lget(twix->data->hdrs, 0));
+
 	twix_close(twix);
 
 	return 0;
