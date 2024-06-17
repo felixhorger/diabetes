@@ -64,6 +64,24 @@ struct ReadoutHeader
 	uint32_t	crc;
 };
 
+const int idx_hdr_offset = ( // Where the indices start
+	sizeof(uint32_t) +
+	sizeof(int32_t) +
+	sizeof(uint32_t) +
+	sizeof(uint32_t) +
+	sizeof(uint32_t) +
+	sizeof(uint16_t) +
+	sizeof(uint16_t) +
+	sizeof(int32_t) +
+	sizeof(int32_t) +
+	sizeof(int32_t) +
+	sizeof(int32_t) +
+	sizeof(uint64_t) +
+	sizeof(uint16_t) +
+	sizeof(uint16_t)
+);
+
+
 struct ChannelHeader
 {
 	uint32_t	type_and_length;
@@ -78,7 +96,7 @@ struct ChannelHeader
 };
 
 
-size_t get_readout_num_bytes(ReadoutHeader *readout_hdr)
+uint32_t get_readout_num_bytes(ReadoutHeader *readout_hdr)
 {
 	return readout_hdr->dma_length_and_flags % (1 << 25);
 }
@@ -248,6 +266,69 @@ void twix_load_data(Twix* twix, int scan)
 
 	if (twix->data == NULL) twix->data = (ScanData *) malloc(sizeof(ScanData) * twix->file_header->num_scans);
 	twix->data[scan] = data;
+
+	return;
+}
+
+// TODO: scan and also change twix struct to make data an array of scandatas
+void twix_get_scandata(Twix *twix, float **kspace, uint16_t **idx, uint8_t *which_idx, uint8_t num_idx)
+{
+	// TODO: check data == NULL
+	int num_readouts = twix->data->n;
+	ReadoutHeader *hdr = lget(twix->data->hdrs, 0);
+
+	uint16_t num_samples = hdr->num_samples;
+	uint16_t num_channels = hdr->num_channels;
+	uint32_t bytes_per_channel = sizeof(float) * 2 * num_samples; // and per readout
+	uint32_t bytes_per_readout = bytes_per_channel * num_channels;
+	// 2 is for complex
+
+	float *kspace_mem = (float *)malloc(bytes_per_readout * num_readouts);
+	uint16_t *idx_mem = (uint16_t *)malloc(sizeof(uint16_t) * num_idx * num_readouts);
+
+	uint16_t idx_offset[14]; // max number of indices in header
+	for (int i = 0; i < num_idx; i++) idx_offset[i] = idx_hdr_offset + sizeof(uint16_t) * which_idx[i];
+
+	uint16_t *ptr_idx = idx_mem;
+	void *ptr_kspace = kspace_mem;
+	uint32_t expected_bytes_per_channel = sizeof(ChannelHeader) + bytes_per_channel;
+	uint32_t expected_bytes_per_readout = bytes_per_readout + num_channels * sizeof(ChannelHeader);
+
+	size_t num_actual_readouts = 0;
+	for (int i = 0; i < num_readouts; i++) {
+		hdr = lget(twix->data->hdrs, i);
+
+		// Check if it's an actual readout
+		uint64_t flags = hdr->eval_info_mask;
+		if (
+			flags & NO_IMAGE_SCAN ||
+			(flags & EVALINFOMASK_PATREFSCAN && !(flags & EVALINFOMASK_PATREFANDIMASCAN))
+		) continue;
+
+		void *pos = (void *)hdr;
+		
+		for (int j = 0; j < num_idx; j++) ptr_idx[j] = *(uint16_t *)(pos + idx_offset[j]);
+		ptr_idx += num_idx;
+
+		uint32_t bytes_this_readout = get_readout_num_bytes(hdr) - sizeof(ReadoutHeader);
+		if (expected_bytes_per_readout != bytes_this_readout) {
+			printf("Error: unexpected number of bytes in readout (exp %d, got %d)\n", bytes_per_readout, bytes_this_readout);
+			//exit(EXIT_FAILURE);
+		}
+
+		pos += sizeof(ReadoutHeader);
+
+		for (int c = 0; c < num_channels; c++) {
+			memcpy(ptr_kspace, pos, bytes_per_channel);
+			pos += expected_bytes_per_channel;
+			ptr_kspace += bytes_per_channel;
+		}
+
+		num_actual_readouts++;
+	}
+
+	*kspace = realloc(kspace_mem, num_actual_readouts * bytes_per_readout);
+	*idx = realloc(idx_mem, num_actual_readouts * num_idx * sizeof(uint16_t));
 
 	return;
 }

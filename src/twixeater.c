@@ -158,8 +158,43 @@ int main(int argc, char* argv[])
 
 	twix_load_data(twix, 0);
 	printf("Number of readouts %ld\n", twix->data->n);
-	print_readout_header(lget(twix->data->hdrs, 10));
-	print_readout_header(lget(twix->data->hdrs, 0));
+	//print_readout_header(lget(twix->data->hdrs, 0));
+	//print_readout_header(lget(twix->data->hdrs, 10));
+
+	printf("Echoes %d %d %d %d %d %d %d %d %d\n",
+		lget(twix->data->hdrs, 0)->echo,
+		lget(twix->data->hdrs, 1)->echo,
+		lget(twix->data->hdrs, 2)->echo,
+		lget(twix->data->hdrs, 3)->echo,
+		lget(twix->data->hdrs, 4)->echo,
+		lget(twix->data->hdrs, 5)->echo,
+		lget(twix->data->hdrs, 6)->echo,
+		lget(twix->data->hdrs, 7)->echo,
+		lget(twix->data->hdrs, 8)->echo
+	);
+
+	printf("Header expected size %d, measured %ld\n", get_readout_num_bytes(lget(twix->data->hdrs, 0)), (size_t)lget(twix->data->hdrs, 1) - (size_t)lget(twix->data->hdrs, 0));
+
+	printf("Scan counter %d %d\n", lget(twix->data->hdrs, 0)->scan_counter, lget(twix->data->hdrs, 1)->scan_counter);
+
+	//ChannelHeader *p = (ChannelHeader *)(lget(twix->data->hdrs, 0)+1);
+	//printf("%d\n",     p->id);
+	//printf("%d\n",
+	//	(
+	//		(ChannelHeader *)(
+	//			(void *)p + 32*(sizeof(ChannelHeader) + 2 * 4 * 96)
+	//		)
+	//	)->id
+	//);
+
+
+	float *kspace;
+	uint16_t *idx;
+	uint8_t which_idx[] = {0, 3};
+	twix_get_scandata(twix, &kspace, &idx, which_idx, 2);
+	free(kspace);
+	free(idx);
+
 
 	twix_close(twix);
 
