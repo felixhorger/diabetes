@@ -85,8 +85,12 @@ void twix_close(Twix* twix)
 
 	// TODO: needs freeing of all substructures
 	if (twix->data != NULL) {
-		free(twix->data->buffer);
-		lfree(twix->data->hdrs);
+		for (int scan = 0; scan < twix->file_header->num_scans; scan++) {
+			ScanData *scan_data = twix->data + scan;
+			if (scan_data == NULL) continue;
+			free(scan_data->buffer);
+			lfree(scan_data->hdrs);
+		}
 		free(twix->data);
 	}
 
@@ -107,75 +111,76 @@ int main(int argc, char* argv[])
 	}
 
 	Twix* twix = twix_open(argv[1]);
-	twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
-	twix_load_protocol(twix, 0, twix_config);
-	twix_load_protocol(twix, 0, twix_meas);
-	twix_load_protocol(twix, 0, twix_dicom);
-	twix_load_protocol(twix, 0, twix_measyaps);
+	//twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
+	//twix_load_protocol(twix, 0, twix_config);
+	//twix_load_protocol(twix, 0, twix_meas);
+	//twix_load_protocol(twix, 0, twix_dicom);
+	//twix_load_protocol(twix, 0, twix_measyaps);
 
-	printf("Number of Rx channels %d\n", twix_receive_channels(twix, 0));
+	//printf("Number of Rx channels %d\n", twix_receive_channels(twix, 0));
 
 	int size[3];
-	twix_kspace_size(twix, 0, size);
-	printf("kspace size: %d %d %d\n", size[0], size[1], size[2]);
+	//twix_kspace_size(twix, 0, size);
+	//printf("kspace size: %d %d %d\n", size[0], size[1], size[2]);
 
 	int accel[2];
-	twix_acceleration_factors(twix, 0, accel);
-	printf("acceleration: %d %d\n", accel[0], accel[1]);
+	//twix_acceleration_factors(twix, 0, accel);
+	//printf("acceleration: %d %d\n", accel[0], accel[1]);
 
-	printf("flip angle %fdeg\n", twix_flip_angle(twix, 0, 0));
-	printf("echo time %fms\n", twix_echo_time(twix, 0, 0));
-	printf("repetition time %fms\n", twix_repetition_time(twix, 0, 0));
-	printf("dwell time %fmus\n", twix_dwell_time(twix, 0));
+	//printf("flip angle %fdeg\n", twix_flip_angle(twix, 0, 0));
+	//printf("echo time %fms\n", twix_echo_time(twix, 0, 0));
+	//printf("repetition time %fms\n", twix_repetition_time(twix, 0, 0));
+	//printf("dwell time %fmus\n", twix_dwell_time(twix, 0));
 
-	twix_ref_dims(twix, 0, size);
-	printf("ref size: %d %d \n", size[0], size[1]);
+	//twix_ref_dims(twix, 0, size);
+	//printf("ref size: %d %d \n", size[0], size[1]);
 
 	double orientation[4], shift[3], fov[3];
-	twix_coordinates(twix, 0, orientation, shift, fov);
-	printf(
-		"Normal: (%f, %f, %f)\nIn-plane rotation: %fdeg\nShift: (%f, %f, %f)mm\nField of view: (%f, %f, %f)mm\n",
-		orientation[0], orientation[1], orientation[2],
-		orientation[3],
-		shift[0], shift[1], shift[2],
-		fov[0], fov[1], fov[2]
-	);
+	//twix_coordinates(twix, 0, orientation, shift, fov);
+	//printf(
+	//	"Normal: (%f, %f, %f)\nIn-plane rotation: %fdeg\nShift: (%f, %f, %f)mm\nField of view: (%f, %f, %f)mm\n",
+	//	orientation[0], orientation[1], orientation[2],
+	//	orientation[3],
+	//	shift[0], shift[1], shift[2],
+	//	fov[0], fov[1], fov[2]
+	//);
 
 
 	char pos[4];
-	twix_patient_position(twix, 0, pos);
-	printf("Patient position %s\n", pos);
+	//twix_patient_position(twix, 0, pos);
+	//printf("Patient position %s\n", pos);
 
-	printf("Patient sex %ld\n", twix_patient_sex(twix, 0));
+	//printf("Patient sex %ld\n", twix_patient_sex(twix, 0));
 
-	double doubleparam;
-	long longparam;
-	twix_wip_param(twix, 0, &doubleparam, 2);
-	twix_wip_param(twix, 0, &longparam, 10);
-	printf("WIP Param at index 2 (long) %ld, at index 10 (double) %f\n", longparam, doubleparam);
+	//double doubleparam;
+	//long longparam;
+	//twix_wip_param(twix, 0, &doubleparam, 2);
+	//twix_wip_param(twix, 0, &longparam, 10);
+	//printf("WIP Param at index 2 (long) %ld, at index 10 (double) %f\n", longparam, doubleparam);
 
-	printf("Reference voltage %fV\n", twix_ref_voltage(twix, 0));
+	//printf("Reference voltage %fV\n", twix_ref_voltage(twix, 0));
 
 	twix_load_data(twix, 0);
-	printf("Number of readouts %ld\n", twix->data->n);
+	//printf("Number of readouts %ld\n", twix->data->n);
 	//print_readout_header(lget(twix->data->hdrs, 0));
-	//print_readout_header(lget(twix->data->hdrs, 10));
+	//print_readout_header(lget(twix->data->hdrs, 255));
 
-	printf("Echoes %d %d %d %d %d %d %d %d %d\n",
-		lget(twix->data->hdrs, 0)->echo,
-		lget(twix->data->hdrs, 1)->echo,
-		lget(twix->data->hdrs, 2)->echo,
-		lget(twix->data->hdrs, 3)->echo,
-		lget(twix->data->hdrs, 4)->echo,
-		lget(twix->data->hdrs, 5)->echo,
-		lget(twix->data->hdrs, 6)->echo,
-		lget(twix->data->hdrs, 7)->echo,
-		lget(twix->data->hdrs, 8)->echo
-	);
 
-	printf("Header expected size %d, measured %ld\n", get_readout_num_bytes(lget(twix->data->hdrs, 0)), (size_t)lget(twix->data->hdrs, 1) - (size_t)lget(twix->data->hdrs, 0));
+	//printf("Echoes %d %d %d %d %d %d %d %d %d\n",
+	//	lget(twix->data->hdrs, 0)->echo,
+	//	lget(twix->data->hdrs, 1)->echo,
+	//	lget(twix->data->hdrs, 2)->echo,
+	//	lget(twix->data->hdrs, 3)->echo,
+	//	lget(twix->data->hdrs, 4)->echo,
+	//	lget(twix->data->hdrs, 5)->echo,
+	//	lget(twix->data->hdrs, 6)->echo,
+	//	lget(twix->data->hdrs, 7)->echo,
+	//	lget(twix->data->hdrs, 8)->echo
+	//);
 
-	printf("Scan counter %d %d\n", lget(twix->data->hdrs, 0)->scan_counter, lget(twix->data->hdrs, 1)->scan_counter);
+	//printf("Header expected size %d, measured %ld\n", get_readout_num_bytes(lget(twix->data->hdrs, 0)), (size_t)lget(twix->data->hdrs, 1) - (size_t)lget(twix->data->hdrs, 0));
+
+	//printf("Scan counter %d %d\n", lget(twix->data->hdrs, 0)->scan_counter, lget(twix->data->hdrs, 1)->scan_counter);
 
 	//ChannelHeader *p = (ChannelHeader *)(lget(twix->data->hdrs, 0)+1);
 	//printf("%d\n",     p->id);
@@ -191,10 +196,34 @@ int main(int argc, char* argv[])
 	float *kspace;
 	uint16_t *idx;
 	uint8_t which_idx[] = {0, 3};
-	twix_get_scandata(twix, &kspace, &idx, which_idx, 2);
+	size_t num_readouts = twix_get_scandata(twix, &kspace, &idx, which_idx, 2);
+	//printf("Number of actual readouts %ld\n", num_readouts);
+
+	//for (int i = 0; i < 1000; i++) printf("%e\n", kspace[i]);
+
+	//FILE *f = fopen("twixkspace.cfl", "r");
+	//size_t num_bytes = sizeof(float) * 2 * 32 * 96 * num_readouts;
+	//float *kspace_julia = malloc(num_bytes);
+	//safe_fread(f, kspace_julia, num_bytes);
+	//fclose(f);
+
+	//for (int i = 0; i < num_bytes / sizeof(float); i++) {
+	//	float d = kspace[i] - kspace_julia[i];
+	//	if (d != 0.0) {
+	//		printf("%d %d\n", idx[2 * (i / (2 * 96 * 32))], idx[2 * (i / (2 * 96 * 32))+1]);
+	//		printf(
+	//			"kspace data differs at index %d (%e, %e) with difference %e\n",
+	//			i, kspace[i], kspace_julia[i], d
+	//		);
+	//	}
+	//}
+
+
+	//printf("Difference in hdr pointers %ld\n", (size_t)lget(twix->data->hdrs, 256) - (size_t)lget(twix->data->hdrs, 255));
+
+	//free(kspace_julia);
 	free(kspace);
 	free(idx);
-
 
 	twix_close(twix);
 

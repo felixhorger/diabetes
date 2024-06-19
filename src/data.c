@@ -14,13 +14,13 @@
 struct ScanData
 {
 	char *buffer; // data read from file
+	int n;
 	ReadoutHeader **hdrs; // pointers to readout headers
-	size_t n;
 };
 
 struct ReadoutHeader
 {
-	uint32_t	dma_length_and_flags; // What is dma? First 25 bits are length, last 7 are flags. Conversion via dma_length_and_flags % (1 << 25) I think
+	uint32_t	dma_length_and_flags; // What is dma? First 25 bits are length, last 7 are flags. Conversion via dma_length_and_flags % (1 << 25)
 	int32_t		meas_uid;
 	uint32_t	scan_counter;
 	uint32_t	time_stamp;
@@ -207,11 +207,20 @@ void print_readout_header(ReadoutHeader *hdr)
 
 // TODO: how to use num_bytes to only read a certain number of readouts? How is e.g. a measurement/average indicated?
 // Could say read n readouts, skipping the sync and other special ones
-ScanData read_data(FILE *f, size_t num_bytes)
+ScanData read_data(FILE *f, size_t num_bytes) // TODO: rename to twix_read_data?
 {
+	if (num_bytes < sizeof(ReadoutHeader)) {
+		printf("Error: input ended prematurely in read_data()");
+		exit(EXIT_FAILURE);
+	}
+
 	// Read in scan data
 	char *scan_buffer = (char *)malloc(num_bytes);
-	safe_fread(f, scan_buffer, num_bytes); // TODO: this can be problematic, since it reads all into memory, use case for when this is bad?
+	safe_fread(f, scan_buffer, num_bytes);
+
+	// TODO: rewrite this: use mmap, and also change get_scandata() so that the first call to it
+	// finds the readout headers. Otherwise memory is iterated multiple times.
+	// Actually, is it necessary to find the readout headers in the first place? Don't think so
 
 	// Set up structure holding the parsed data
 	ScanData scan_data;
@@ -221,10 +230,6 @@ ScanData read_data(FILE *f, size_t num_bytes)
 
 	// Parse scan data
 	char *pos = scan_buffer;
-	if (num_bytes < sizeof(ReadoutHeader)) {
-		free(scan_buffer);
-		return scan_data;
-	}
 	while (pos < scan_buffer + num_bytes) {
 		int n = scan_data.n;
 		scan_data.n += 1;
@@ -239,12 +244,15 @@ ScanData read_data(FILE *f, size_t num_bytes)
 		lset(scan_data.hdrs, n, readout_hdr);
 		pos += get_readout_num_bytes(readout_hdr);
 	}
-	if (pos != scan_buffer + num_bytes) {
-		// TODO: Error?
-		lfree(scan_data.hdrs);
-		free(scan_buffer);
-		return scan_data;
-	}
+	// No idea why this was here, keeping it in case removal introduces bug
+	//if (pos != scan_buffer + num_bytes) {
+	//	// TODO: Error?
+	//	printf("asdasdasd\n");
+	//	lfree(scan_data.hdrs);
+	//	free(scan_buffer);
+	//	exit(EXIT_FAILURE);
+	//	return scan_data;
+	//}
 	// Note: eof is not reached yet, residual bytes are just zeros I think, why?
 	return scan_data;
 }
@@ -271,7 +279,7 @@ void twix_load_data(Twix* twix, int scan)
 }
 
 // TODO: scan and also change twix struct to make data an array of scandatas
-void twix_get_scandata(Twix *twix, float **kspace, uint16_t **idx, uint8_t *which_idx, uint8_t num_idx)
+size_t twix_get_scandata(Twix *twix, float **kspace, uint16_t **idx, uint8_t *which_idx, uint8_t num_idx)
 {
 	// TODO: check data == NULL
 	int num_readouts = twix->data->n;
@@ -279,12 +287,16 @@ void twix_get_scandata(Twix *twix, float **kspace, uint16_t **idx, uint8_t *whic
 
 	uint16_t num_samples = hdr->num_samples;
 	uint16_t num_channels = hdr->num_channels;
-	uint32_t bytes_per_channel = sizeof(float) * 2 * num_samples; // and per readout
-	uint32_t bytes_per_readout = bytes_per_channel * num_channels;
+	size_t bytes_per_channel = sizeof(float) * 2 * num_samples; // and per readout
+	size_t bytes_per_readout = bytes_per_channel * num_channels;
 	// 2 is for complex
 
-	float *kspace_mem = (float *)malloc(bytes_per_readout * num_readouts);
-	uint16_t *idx_mem = (uint16_t *)malloc(sizeof(uint16_t) * num_idx * num_readouts);
+	float *kspace_mem = (float *)malloc(bytes_per_readout * (size_t)num_readouts);
+	uint16_t *idx_mem = (uint16_t *)malloc(sizeof(uint16_t) * num_idx * (size_t)num_readouts);
+	if (kspace_mem == NULL || idx_mem == NULL) {
+		printf("Error: could not allocate memory for k-space or scan indices\n");
+		exit(EXIT_FAILURE);
+	}
 
 	uint16_t idx_offset[14]; // max number of indices in header
 	for (int i = 0; i < num_idx; i++) idx_offset[i] = idx_hdr_offset + sizeof(uint16_t) * which_idx[i];
@@ -292,11 +304,13 @@ void twix_get_scandata(Twix *twix, float **kspace, uint16_t **idx, uint8_t *whic
 	uint16_t *ptr_idx = idx_mem;
 	void *ptr_kspace = kspace_mem;
 	uint32_t expected_bytes_per_channel = sizeof(ChannelHeader) + bytes_per_channel;
-	uint32_t expected_bytes_per_readout = bytes_per_readout + num_channels * sizeof(ChannelHeader);
+	uint32_t expected_bytes_per_readout = bytes_per_readout + num_channels * sizeof(ChannelHeader) + sizeof(ReadoutHeader);
+	// TODO: clarify in comments, "expected" means different things here 
 
-	size_t num_actual_readouts = 0;
+	int num_actual_readouts = 0;
 	for (int i = 0; i < num_readouts; i++) {
 		hdr = lget(twix->data->hdrs, i);
+		//printf("%d %d %d\n", i, num_readouts, num_actual_readouts);
 
 		// Check if it's an actual readout
 		uint64_t flags = hdr->eval_info_mask;
@@ -310,13 +324,13 @@ void twix_get_scandata(Twix *twix, float **kspace, uint16_t **idx, uint8_t *whic
 		for (int j = 0; j < num_idx; j++) ptr_idx[j] = *(uint16_t *)(pos + idx_offset[j]);
 		ptr_idx += num_idx;
 
-		uint32_t bytes_this_readout = get_readout_num_bytes(hdr) - sizeof(ReadoutHeader);
+		uint32_t bytes_this_readout = get_readout_num_bytes(hdr);
 		if (expected_bytes_per_readout != bytes_this_readout) {
-			printf("Error: unexpected number of bytes in readout (exp %d, got %d)\n", bytes_per_readout, bytes_this_readout);
-			//exit(EXIT_FAILURE);
+			printf("Error: unexpected number of bytes in readout (exp %d, got %d)\n", expected_bytes_per_readout, bytes_this_readout);
+			exit(EXIT_FAILURE);
 		}
 
-		pos += sizeof(ReadoutHeader);
+		pos += sizeof(ReadoutHeader) + sizeof(ChannelHeader);
 
 		for (int c = 0; c < num_channels; c++) {
 			memcpy(ptr_kspace, pos, bytes_per_channel);
@@ -327,9 +341,22 @@ void twix_get_scandata(Twix *twix, float **kspace, uint16_t **idx, uint8_t *whic
 		num_actual_readouts++;
 	}
 
-	*kspace = realloc(kspace_mem, num_actual_readouts * bytes_per_readout);
-	*idx = realloc(idx_mem, num_actual_readouts * num_idx * sizeof(uint16_t));
 
-	return;
+	// TODO: realloc meaningful? Man koennte beim einlesen der daten die eigentliche anzahl readouts speichern, allerdings geht das wenn man zum ersten mal durchgeht, was am optimalsten waere
+	// TODO: apparently reallocarray would be better, it stops safely if the below multiplication overflows
+	// TODO: how can you ensure that memory is not moved for performance?
+	ptr_kspace = kspace_mem; //realloc(kspace_mem, bytes_per_readout * (size_t)num_actual_readouts);
+	ptr_idx = idx_mem; //realloc(idx_mem, sizeof(uint16_t) * (num_idx * (size_t)num_actual_readouts));
+	if (ptr_kspace == NULL || ptr_idx == NULL) {
+		free(kspace_mem);
+		free(idx_mem);
+		printf("Error: realloc in twix_get_scandata() failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	*kspace = ptr_kspace;
+	*idx = ptr_idx;
+
+	return num_actual_readouts;
 }
 
