@@ -199,29 +199,27 @@ int main(int argc, char* argv[])
 	size_t num_readouts = twix_get_scandata(twix, &kspace, &idx, which_idx, 2);
 	//printf("Number of actual readouts %ld\n", num_readouts);
 
-	//for (int i = 0; i < 1000; i++) printf("%e\n", kspace[i]);
+	FILE *f = fopen("julia_kspace.cfl", "r");
+	size_t num_bytes = sizeof(float) * 2 * 32 * 200 * num_readouts;
+	float *kspace_julia = malloc(num_bytes);
+	safe_fread(f, kspace_julia, num_bytes);
+	fclose(f);
 
-	//FILE *f = fopen("twixkspace.cfl", "r");
-	//size_t num_bytes = sizeof(float) * 2 * 32 * 96 * num_readouts;
-	//float *kspace_julia = malloc(num_bytes);
-	//safe_fread(f, kspace_julia, num_bytes);
-	//fclose(f);
-
-	//for (int i = 0; i < num_bytes / sizeof(float); i++) {
-	//	float d = kspace[i] - kspace_julia[i];
-	//	if (d != 0.0) {
-	//		printf("%d %d\n", idx[2 * (i / (2 * 96 * 32))], idx[2 * (i / (2 * 96 * 32))+1]);
-	//		printf(
-	//			"kspace data differs at index %d (%e, %e) with difference %e\n",
-	//			i, kspace[i], kspace_julia[i], d
-	//		);
-	//	}
-	//}
+	for (int i = 0; i < num_bytes / sizeof(float); i++) {
+		float d = kspace[i] - kspace_julia[i];
+		if (d != 0.0) {
+			printf("%d %d\n", idx[2 * (i / (2 * 200 * 32))], idx[2 * (i / (2 * 200 * 32))+1]);
+			printf(
+				"kspace data differs at index %d (%e, %e) with difference %e\n",
+				i, kspace[i], kspace_julia[i], d
+			);
+		}
+	}
 
 
 	//printf("Difference in hdr pointers %ld\n", (size_t)lget(twix->data->hdrs, 256) - (size_t)lget(twix->data->hdrs, 255));
 
-	//free(kspace_julia);
+	free(kspace_julia);
 	free(kspace);
 	free(idx);
 

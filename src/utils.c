@@ -23,7 +23,8 @@ void check_bounds(int i, size_t n, char* msg)
 
 void check_file(FILE *f)
 {
-	if (feof(f)) printf("Error: read EOF\n");
+	if (f == NULL) printf("Error: file == NULL");
+	else if (feof(f)) printf("Error: read EOF\n");
 	else if (ferror(f)) printf("Error: read occurred while reading file\n");
 	else return;
 
@@ -34,6 +35,7 @@ void check_file(FILE *f)
 
 void safe_fread(FILE* f, void* ptr, size_t n)
 {
+	check_file(f);
 	size_t m = fread(ptr, 1, n, f);
 	if (m == n) return;
 	check_file(f);
