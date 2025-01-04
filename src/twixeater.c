@@ -111,7 +111,8 @@ int main(int argc, char* argv[])
 	}
 
 	Twix* twix = twix_open(argv[1]);
-	//twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
+	twix_save_scanner_protocol(twix, 0, "scanner_protocol.pro");
+	return 0;
 	//twix_load_protocol(twix, 0, twix_config);
 	//twix_load_protocol(twix, 0, twix_meas);
 	//twix_load_protocol(twix, 0, twix_dicom);
