@@ -1,6 +1,7 @@
 # Twix Eater - Siemens MRI Raw Data Reader
 
-Can eat twix more rapidely than anyone else, even Augustus Gloop.
+There might be two Twix factories but you'll only need one Twix reader, this one!
+It can eat twix more rapidely than anyone else.
 
-I'd like a discussion with the person who came up with the protocol structure.
+Still in development, but getting there!
 
